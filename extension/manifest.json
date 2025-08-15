@@ -1,0 +1,54 @@
+{
+  "manifest_version": 3,
+  "name": "Twitch Quick Commands",
+  "version": "1.1.0",
+  "description": "Click-to-send preset commands into Twitch chat for interactive streams.",
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
+  "action": {
+    "default_title": "Twitch Quick Commands",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icon16.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
+    }
+  },
+  "permissions": [
+    "activeTab",
+    "tabs",
+    "scripting",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://*.twitch.tv/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "options_page": "options.html",
+  "commands": {
+    "toggle-overlay": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+Y"
+      },
+      "description": "Toggle Twitch Quick Commands panel"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.twitch.tv/*"
+      ],
+      "js": [
+        "content-script.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ]
+}
+

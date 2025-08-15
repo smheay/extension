@@ -1,0 +1,186 @@
+body {
+	margin: 0;
+	font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+}
+
+/* Drag and drop styles */
+.drag-handle {
+	transition: color 0.2s ease;
+	font-size: 16px;
+	font-weight: bold;
+}
+
+.drag-handle:hover {
+	color: #4f46e5 !important;
+}
+
+.item-row[draggable="true"]:hover {
+	background-color: #f8fafc;
+	border-radius: 4px;
+}
+
+.item-row.dragging {
+	opacity: 0.7;
+	transform: rotate(1deg) scale(1.02);
+	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+	transition: none; /* Disable transitions during drag */
+}
+
+.item-row {
+	transition: all 0.2s ease; /* Smooth transitions when not dragging */
+}
+
+/* Section header stability */
+.section-header {
+	background-color: #f8fafc;
+	border-radius: 6px;
+	margin: 12px 0 4px 0;
+	padding: 4px;
+	border: 1px solid #e5e7eb;
+}
+
+.section-header input {
+	background: transparent !important;
+	border: none !important;
+	font-weight: 600;
+	color: #374151;
+}
+
+/* Drop indicators */
+.drop-indicator {
+	height: 2px;
+	background: #4f46e5;
+	margin: 2px 0;
+	border-radius: 2px;
+	position: relative;
+	animation: pulse 1s infinite;
+}
+
+.drop-indicator::before {
+	content: '';
+	position: absolute;
+	left: -4px;
+	top: -2px;
+	width: 6px;
+	height: 6px;
+	background: #4f46e5;
+	border-radius: 50%;
+}
+
+.drop-indicator::after {
+	content: '';
+	position: absolute;
+	right: -4px;
+	top: -2px;
+	width: 6px;
+	height: 6px;
+	background: #4f46e5;
+	border-radius: 50%;
+}
+
+@keyframes pulse {
+	0%, 100% { opacity: 1; }
+	50% { opacity: 0.6; }
+}
+
+/* Invalid drop zone styling */
+.invalid-drop-zone {
+	background-color: #fef2f2 !important;
+	border: 1px dashed #ef4444 !important;
+	border-radius: 4px;
+}
+#app {
+	max-width: 720px;
+	margin: 24px auto;
+	padding: 0 16px;
+}
+h1 { display: inline-block; margin-right: 12px; }
+.profile-bar { display: flex; gap: 8px; align-items: center; margin: 8px 0 12px 0; }
+.profile-bar select { padding: 6px 8px; border: 1px solid #e5e7eb; border-radius: 6px; }
+.profile-bar button { border: 1px solid #e5e7eb; border-radius: 6px; background: #fff; padding: 6px 8px; cursor: pointer; }
+.section-titles { display:none; }
+h1 {
+	font-size: 20px;
+	margin: 0 0 8px 0;
+}
+.sub {
+	margin: 0 0 16px 0;
+	color: #6b7280;
+}
+#commands {
+	display: grid;
+	gap: 10px;
+}
+
+/* Sections container stability */
+#sectionsContainer {
+	position: relative; /* Create stacking context */
+}
+
+#sectionsList {
+	display: grid;
+	gap: 8px;
+	/* Prevent layout shifts during content changes */
+	contain: layout;
+}
+.row {
+	display: grid;
+	grid-template-columns: 24px minmax(120px, 1fr) minmax(200px, 2fr) 24px 24px;
+	gap: 8px;
+	align-items: center;
+	min-height: 40px; /* Prevent height jumping */
+}
+.row input {
+	padding: 8px;
+	border: 1px solid #e5e7eb;
+	border-radius: 6px;
+	font-size: 14px;
+	min-width: 0; /* Prevent input from growing beyond grid cell */
+	width: 100%; /* Take full width of grid cell */
+	box-sizing: border-box; /* Include padding in width calculation */
+	height: 32px; /* Fixed height to prevent row jumping */
+}
+.row button.icon {
+	border: 1px solid #e5e7eb;
+	border-radius: 6px;
+	background: #fff;
+	width: 24px;
+	height: 32px;
+	cursor: pointer;
+}
+.actions {
+	margin-top: 14px;
+	display: flex;
+	gap: 10px;
+}
+button#add, button#save {
+	border: 1px solid #e5e7eb;
+	border-radius: 8px;
+	background: #fff;
+	padding: 8px 12px;
+	cursor: pointer;
+}
+.saved {
+	color: #059669;
+	background: #ecfdf5;
+	border: 1px solid #10b981;
+	border-radius: 8px;
+	padding: 8px 12px;
+	position: fixed;
+	top: 20px;
+	right: 20px;
+	z-index: 1000;
+	font-size: 14px;
+	font-weight: 500;
+	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+	transform: translateY(-100px);
+	opacity: 0;
+	transition: all 0.3s ease;
+}
+
+.saved.show {
+	transform: translateY(0);
+	opacity: 1;
+}
+
+
