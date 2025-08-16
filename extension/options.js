@@ -1,5 +1,5 @@
 async function loadProfiles() {
-	const { tqcProfiles, tqcActiveProfileId, quickCommands } = await chrome.storage.sync.get(["tqcProfiles", "tqcActiveProfileId", "quickCommands"]);
+	const { tqcProfiles, tqcActiveProfileId } = await chrome.storage.sync.get(["tqcProfiles", "tqcActiveProfileId"]);
 	let profiles = tqcProfiles || {};
 	let activeId = tqcActiveProfileId;
 	if (!activeId) {

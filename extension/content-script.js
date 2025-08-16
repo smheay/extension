@@ -236,13 +236,8 @@
 	async function loadActiveProfile() {
 		const { tqcProfiles, tqcActiveProfileId } = await safeSyncGet(['tqcProfiles', 'tqcActiveProfileId']);
 		
-		// DEBUG: Log what we're loading from storage
-		console.log('🔍 LOADING PROFILE FROM STORAGE:', { tqcProfiles, tqcActiveProfileId });
-		
 		if (tqcProfiles && tqcActiveProfileId && tqcProfiles[tqcActiveProfileId]) {
 			const prof = tqcProfiles[tqcActiveProfileId];
-			console.log('📝 PROFILE SECTIONS COUNT:', prof.sections?.length || 0);
-			console.log('📋 PROFILE SECTIONS:', prof.sections);
 			
 			return {
 				id: tqcActiveProfileId,
@@ -251,11 +246,6 @@
 			};
 		}
 		return { id: 'default', name: 'Default', sections: [] };
-	}
-
-	async function loadCommands() {
-		const p = await loadActiveProfile();
-		return []; // Commands are now organized in sections, not as a flat list
 	}
 
 	async function loadOverlayPosition() {
@@ -422,23 +412,18 @@
 		
 		async function render() {
 			if (isRendering) {
-				console.log('🎨 RENDER BLOCKED - Already rendering');
 				return;
 			}
 			
 			isRendering = true;
-			console.log('🎨 RENDER STARTED');
 			
 			try {
-				const cmds = await loadCommands();
-				
 				// Force clear the body completely
 				while (body.firstChild) {
 					body.removeChild(body.firstChild);
 				}
 				
 				const active = await loadActiveProfile();
-				console.log('🎨 RENDER - RAW SECTIONS FROM STORAGE:', active.sections?.length || 0);
 				
 				const seenTitles = new Set();
 				let sections = (Array.isArray(active?.sections) ? active.sections : []).filter(sec => {
@@ -447,8 +432,6 @@
 					seenTitles.add(title.toLowerCase());
 					return true;
 				});
-				
-				console.log('🎨 RENDER - FINAL SECTIONS TO DISPLAY:', sections.length);
 			
 			sections.forEach((sec, secIdx) => {
 				const title = (sec.title || 'Section').trim();
@@ -508,7 +491,6 @@
 				}
 			} finally {
 				isRendering = false;
-				console.log('🎨 RENDER COMPLETED');
 			}
 		}
 		await hydrateProfileSelect();
@@ -517,18 +499,12 @@
 		chrome.storage.onChanged.addListener(async (changes, area) => {
 			if (area === 'sync' && (changes.tqcProfiles || changes.tqcActiveProfileId)) {
 				if (!isUpdatingProfile && !isRendering) {
-					console.log('📡 STORAGE CHANGED - Triggering refresh');
 					await hydrateProfileSelect();
 					await render();
-				} else {
-					console.log('📡 STORAGE CHANGED - Blocked (updating or rendering)');
 				}
 				return;
 			}
-			if (area === 'sync' && changes.quickCommands) {
-				body.innerHTML = ''; // Clear before re-rendering
-				await render();
-			}
+
 		});
 
 		// Add form functions
@@ -664,17 +640,10 @@
 			const profiles = tqcProfiles || {};
 			const activeId = tqcActiveProfileId || 'default';
 			
-			// DEBUG: Log what we're saving
-			console.log('💾 SAVING SECTIONS COUNT:', sections.length);
-			console.log('💾 SAVING SECTIONS:', sections);
-			console.log('💾 EXISTING PROFILE:', profiles[activeId]);
-			
 			profiles[activeId] = {
 				...(profiles[activeId] || {}),
 				sections: sections
 			};
-			
-			console.log('💾 FINAL PROFILE TO SAVE:', profiles[activeId]);
 			
 			await safeSyncSet({ tqcProfiles: profiles });
 		}

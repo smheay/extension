@@ -119,15 +119,12 @@ chrome.runtime.onInstalled.addListener(async () => {
 });
 
 async function ensureProfiles() {
-	// DISABLED: This was causing section duplication bugs
-	// Only run on fresh installs via onInstalled listener
+	// Disabled - only seed profiles on fresh install via onInstalled listener
 	return;
 }
 
-// DEBUG: Function to completely clean and reset profiles to eliminate duplicates
+// Function to completely clean and reset profiles to eliminate duplicates
 async function cleanResetProfiles() {
-	console.log('🧹 CLEANING AND RESETTING PROFILES - ELIMINATING DUPLICATES');
-	
 	const cleanProfiles = {
 		default: createDefaultGameProfile(),
 		emotes: createEmotesProfile()
@@ -137,8 +134,6 @@ async function cleanResetProfiles() {
 		tqcProfiles: cleanProfiles, 
 		tqcActiveProfileId: 'default' 
 	});
-	
-	console.log('✅ PROFILES CLEANED - DUPLICATES ELIMINATED');
 }
 
 chrome.runtime.onInstalled.addListener(async (details) => {
@@ -148,9 +143,9 @@ chrome.runtime.onInstalled.addListener(async (details) => {
 	}
 });
 
-// Handle all messages
+// Handle all messages - consolidated single listener
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-	// Handle complete profile cleanup (DEBUG)
+	// Handle complete profile cleanup
 	if (message && message.type === 'CLEAN_RESET_PROFILES') {
 		(async () => {
 			try {
@@ -160,7 +155,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 				sendResponse({ ok: false, error: error.message });
 			}
 		})();
-		return true; // Will respond asynchronously
+		return true;
 	}
 	
 	// Handle recreation of Game commands profile
@@ -178,7 +173,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 				sendResponse({ ok: false, error: error.message });
 			}
 		})();
-		return true; // Will respond asynchronously
+		return true;
 	}
 	
 	// Handle recreation of Emotes profile
@@ -196,50 +191,48 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 				sendResponse({ ok: false, error: error.message });
 			}
 		})();
-		return true; // Will respond asynchronously
+		return true;
 	}
 	
-	// Handle send-command requests from popup and forward into the active Twitch tab via content script
-	if (!(message && message.type === "SEND_TWITCH_MESSAGE")) return false;
+	// Handle toggle overlay from popup
+	if (message && message.type === 'TQC_TOGGLE_OVERLAY_FROM_POPUP') {
+		(async () => {
+			const tabResult = await getActiveTwitchTab();
+			if (tabResult.error) {
+				sendResponse({ ok: false });
+				return;
+			}
 
-	(async () => {
-		const tabResult = await getActiveTwitchTab();
-		if (tabResult.error) {
-			sendResponse({ ok: false, error: tabResult.error });
-			return;
-		}
-
-		const result = await ensureContentScriptAndSendMessage(
-			tabResult.tab.id, 
-			{ type: "TWITCH_INSERT_AND_SEND", text: message.text }
-		);
-		
-		sendResponse(result.ok ? result.response : { ok: false, error: result.error });
-	})();
-
-	return true; // keep channel open for async response
-});
-
-// Toggle overlay when requested by popup
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-	if (!(message && message.type === 'TQC_TOGGLE_OVERLAY_FROM_POPUP')) return false;
+			const result = await ensureContentScriptAndSendMessage(
+				tabResult.tab.id, 
+				{ type: 'TQC_TOGGLE_OVERLAY' }
+			);
+			
+			sendResponse({ ok: result.ok, error: result.error });
+		})();
+		return true;
+	}
 	
-	(async () => {
-		const tabResult = await getActiveTwitchTab();
-		if (tabResult.error) {
-			sendResponse({ ok: false });
-			return;
-		}
+	// Handle send-command requests from popup
+	if (message && message.type === "SEND_TWITCH_MESSAGE") {
+		(async () => {
+			const tabResult = await getActiveTwitchTab();
+			if (tabResult.error) {
+				sendResponse({ ok: false, error: tabResult.error });
+				return;
+			}
 
-		const result = await ensureContentScriptAndSendMessage(
-			tabResult.tab.id, 
-			{ type: 'TQC_TOGGLE_OVERLAY' }
-		);
-		
-		sendResponse({ ok: result.ok, error: result.error });
-	})();
+			const result = await ensureContentScriptAndSendMessage(
+				tabResult.tab.id, 
+				{ type: "TWITCH_INSERT_AND_SEND", text: message.text }
+			);
+			
+			sendResponse(result.ok ? result.response : { ok: false, error: result.error });
+		})();
+		return true;
+	}
 	
-	return true;
+	return false; // No handler found
 });
 
 // Keyboard shortcut to toggle overlay
