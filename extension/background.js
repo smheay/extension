@@ -105,30 +105,13 @@ async function ensureContentScriptAndSendMessage(tabId, message) {
 	}
 }
 
-// Seed profiles on first install only, using the sections-first schema
-chrome.runtime.onInstalled.addListener(async () => {
-	const { tqcProfiles } = await chrome.storage.sync.get(["tqcProfiles"]);
-	if (tqcProfiles && typeof tqcProfiles === 'object') return;
-	
-	const seedProfiles = {
-		default: createDefaultGameProfile(),
-		emotes: createEmotesProfile()
-	};
-	
-	await chrome.storage.sync.set({ tqcProfiles: seedProfiles, tqcActiveProfileId: 'default' });
-});
-
-async function ensureProfiles() {
-	// Disabled - only seed profiles on fresh install via onInstalled listener
-	return;
-}
-
-
-
 chrome.runtime.onInstalled.addListener(async (details) => {
-	// Only setup profiles on fresh install, not on updates
 	if (details.reason === 'install') {
-		await ensureProfiles();
+		const seedProfiles = {
+			default: createDefaultGameProfile(),
+			emotes: createEmotesProfile()
+		};
+		await chrome.storage.sync.set({ tqcProfiles: seedProfiles, tqcActiveProfileId: 'default' });
 	}
 });
 

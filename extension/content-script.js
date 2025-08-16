@@ -275,7 +275,7 @@
 	}
 
 	async function loadOverlayPosition() {
-		// Prefer local storage to avoid sync write quotas; fall back to legacy sync key
+		// Prefer local storage for position data
 		const local = await safeLocalGet('tqcOverlayPos');
 		if (local && local.tqcOverlayPos) return local.tqcOverlayPos;
 		const sync = await safeSyncGet('tqcOverlayPos');
@@ -285,7 +285,7 @@
 	async function saveOverlayPosition(pos) { await safeLocalSet({ tqcOverlayPos: pos }); }
 
 	function ensureStyles(root) {
-		// Remove old styles first
+		// Remove existing styles
 		const oldStyle = root.querySelector('#tqc-style');
 		if (oldStyle) oldStyle.remove();
 		

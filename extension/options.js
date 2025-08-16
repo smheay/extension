@@ -338,8 +338,6 @@ document.getElementById("resetDefaults").addEventListener("click", async () => {
 	}
 });
 
-// Manual save button removed - auto-save handles all changes
-
 document.getElementById("addProfile").addEventListener("click", async () => {
 	const { profiles, activeId } = await loadProfiles();
 	const id = `p_${Date.now()}`;
@@ -375,8 +373,7 @@ async function hydrateProfilesUI() {
 		const latest = await loadProfiles();
 		await hydrateProfilesUI(); // Refresh the entire UI after profile change
 	});
-	// Commands are now handled through sections, not as a flat list
-	// Legacy commands container is no longer used
+
 	const commandsContainer = document.getElementById("commands");
 	if (commandsContainer) {
 		commandsContainer.innerHTML = '';
