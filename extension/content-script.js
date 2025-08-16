@@ -266,10 +266,21 @@
 			.tqc-title{font-size:13px;margin:0;display:flex;gap:8px;align-items:center}
 			.tqc-select{border:1px solid #374151;background:#111827;color:#e5e7eb;border-radius:6px;padding:6px 8px;font-size:12px}
 			.tqc-body{padding:10px;display:grid;grid-template-columns:repeat(2,1fr);gap:8px;max-height:50vh;overflow:auto}
-			.tqc-btn{border:1px solid #374151;border-radius:6px;background:#111827;color:#e5e7eb;padding:8px 10px;font-size:12px;text-align:center;cursor:pointer}
+			.tqc-btn{border:1px solid #374151;border-radius:6px;background:#111827;color:#e5e7eb;padding:8px 10px;font-size:12px;text-align:center;cursor:pointer;display:flex;align-items:center;justify-content:center}
 			.tqc-btn:hover{background:#0f172acc}
 			.tqc-close{background:transparent;border:none;color:#9ca3af;cursor:pointer;font-size:14px}
-			.tqc-section-title{grid-column:1/-1 !important;font-size:11px;color:#9ca3af;margin:4px 0 0 0;text-transform:uppercase;letter-spacing:.04em}
+			.tqc-section-title{grid-column:1/-1 !important;font-size:11px;color:#9ca3af;margin:4px 0 0 0;text-transform:uppercase;letter-spacing:.04em;display:flex;justify-content:space-between;align-items:center}
+			.tqc-section-add{background:#16a34a !important;border:none !important;color:#fff !important;border-radius:4px;width:18px !important;height:18px !important;font-size:12px;cursor:pointer;font-weight:bold;position:relative !important;padding:0 !important;margin:0 !important;box-sizing:border-box !important;display:table-cell !important;vertical-align:middle !important;text-align:center !important}
+			.tqc-section-add:hover{background:#15803d}
+			.tqc-add-form{grid-column:1/-1;background:linear-gradient(135deg,#0f172a 0%,#1e293b 100%);border:1px solid #334155;border-radius:8px;padding:12px;margin:6px 0;box-shadow:0 4px 12px rgba(0,0,0,0.15)}
+			.tqc-add-input{background:#111827;border:1px solid #374151;border-radius:6px;color:#d1d5db;padding:8px 10px;font-size:12px;width:100%;margin:3px 0;box-sizing:border-box;transition:border-color 0.2s ease,box-shadow 0.2s ease}
+			.tqc-add-input:focus{outline:none;border-color:#16a34a;box-shadow:0 0 0 2px rgba(22,163,74,0.1)}
+			.tqc-add-input::placeholder{color:#6b7280;font-style:italic}
+			.tqc-add-buttons{display:flex;gap:8px;margin-top:10px;justify-content:flex-end}
+			.tqc-add-btn{border:1px solid #374151;border-radius:6px;background:#374151;color:#d1d5db;padding:8px 16px;font-size:11px;cursor:pointer;box-shadow:0 2px 4px rgba(0,0,0,0.2);display:flex;align-items:center;justify-content:center;transition:all 0.2s ease;font-weight:500}
+			.tqc-add-btn.save{background:linear-gradient(135deg,#16a34a 0%,#15803d 100%);border-color:#15803d;color:#fff;box-shadow:0 2px 6px rgba(22,163,74,0.3)}
+			.tqc-add-btn:hover{transform:translateY(-1px);box-shadow:0 4px 8px rgba(0,0,0,0.3)}
+			.tqc-add-btn.save:hover{box-shadow:0 4px 12px rgba(22,163,74,0.4)}
 		`;
 		root.appendChild(style);
 	}
@@ -286,16 +297,35 @@
 		const title = document.createElement('div');
 		title.className = 'tqc-title';
 		const titleText = document.createElement('span');
-		titleText.textContent = 'Quick Commands';
+		titleText.textContent = '';
 		const profileSelect = document.createElement('select');
 		profileSelect.className = 'tqc-select';
 		profileSelect.title = 'Switch list';
 		title.appendChild(titleText);
 		title.appendChild(profileSelect);
+		const addBtn = document.createElement('button');
+		addBtn.className = 'tqc-close';
+		addBtn.textContent = '+';
+		addBtn.title = 'Add new section';
+		addBtn.style.marginRight = '8px';
+		addBtn.style.background = '#16a34a';
+		addBtn.style.color = '#ffffff';
+		addBtn.style.fontWeight = 'bold';
+		addBtn.style.display = 'flex';
+		addBtn.style.alignItems = 'center';
+		addBtn.style.justifyContent = 'center';
+		addBtn.style.width = '24px';
+		addBtn.style.height = '24px';
+		addBtn.style.lineHeight = '1';
+		addBtn.style.padding = '0';
+		addBtn.style.textAlign = 'center';
+		addBtn.style.borderRadius = '4px';
+		
 		const close = document.createElement('button');
 		close.className = 'tqc-close';
 		close.textContent = '✕';
 		header.appendChild(title);
+		header.appendChild(addBtn);
 		header.appendChild(close);
 
 		const body = document.createElement('div');
@@ -331,6 +361,10 @@
 		window.addEventListener('mouseup', async () => {
 			overlayMove.dragging = false;
 			if (lastPos) { await saveOverlayPosition(lastPos); }
+		});
+
+		addBtn.addEventListener('click', () => {
+			showAddSectionForm();
 		});
 
 		close.addEventListener('click', () => { container.style.display = 'none'; });
@@ -376,15 +410,24 @@
 				return true;
 			});
 			
-			sections.forEach(sec => {
+			sections.forEach((sec, secIdx) => {
 				const title = (sec.title || 'Section').trim();
 				const items = Array.isArray(sec.items) ? sec.items : [];
 				
-				if (items.length === 0) return;
-				
 				const headerEl = document.createElement('div');
 				headerEl.className = 'tqc-section-title';
-				headerEl.textContent = title;
+				
+				const titleSpan = document.createElement('span');
+				titleSpan.textContent = title;
+				
+				const addSectionBtn = document.createElement('button');
+				addSectionBtn.className = 'tqc-section-add';
+				addSectionBtn.innerHTML = '<span style="display:block;width:100%;height:100%;line-height:18px;text-align:center;">+</span>';
+				addSectionBtn.title = 'Add command to this section';
+				addSectionBtn.addEventListener('click', () => showAddCommandForm(secIdx));
+				
+				headerEl.appendChild(titleSpan);
+				headerEl.appendChild(addSectionBtn);
 				body.appendChild(headerEl);
 				
 				const spacer = document.createElement('div');
@@ -430,6 +473,147 @@
 				await render();
 			}
 		});
+
+		// Add form functions
+		function showAddSectionForm() {
+			// Remove any existing forms
+			body.querySelectorAll('.tqc-add-form').forEach(f => f.remove());
+			
+			const form = document.createElement('div');
+			form.className = 'tqc-add-form';
+			
+			const titleInput = document.createElement('input');
+			titleInput.className = 'tqc-add-input';
+			titleInput.placeholder = 'Section title';
+			titleInput.type = 'text';
+			
+			const buttons = document.createElement('div');
+			buttons.className = 'tqc-add-buttons';
+			
+			const saveBtn = document.createElement('button');
+			saveBtn.className = 'tqc-add-btn save';
+			saveBtn.textContent = 'Add Section';
+			
+			const cancelBtn = document.createElement('button');
+			cancelBtn.className = 'tqc-add-btn';
+			cancelBtn.textContent = 'Cancel';
+			
+			buttons.appendChild(saveBtn);
+			buttons.appendChild(cancelBtn);
+			form.appendChild(titleInput);
+			form.appendChild(buttons);
+			
+			// Insert at top of body
+			body.insertBefore(form, body.firstChild);
+			titleInput.focus();
+			
+			saveBtn.addEventListener('click', async () => {
+				const title = titleInput.value.trim();
+				if (!title) return;
+				
+				const active = await loadActiveProfile();
+				const sections = Array.isArray(active?.sections) ? active.sections : [];
+				sections.push({ title, items: [] });
+				
+				await saveProfileSections(sections);
+				form.remove();
+				await render();
+			});
+			
+			cancelBtn.addEventListener('click', () => form.remove());
+			titleInput.addEventListener('keydown', (e) => {
+				if (e.key === 'Enter') saveBtn.click();
+				if (e.key === 'Escape') cancelBtn.click();
+			});
+		}
+		
+		function showAddCommandForm(sectionIndex) {
+			// Remove any existing forms
+			body.querySelectorAll('.tqc-add-form').forEach(f => f.remove());
+			
+			const form = document.createElement('div');
+			form.className = 'tqc-add-form';
+			
+			const labelInput = document.createElement('input');
+			labelInput.className = 'tqc-add-input';
+			labelInput.placeholder = 'Command label (what shows on button)';
+			labelInput.type = 'text';
+			
+			const textInput = document.createElement('input');
+			textInput.className = 'tqc-add-input';
+			textInput.placeholder = 'Command text (what gets sent to chat)';
+			textInput.type = 'text';
+			
+			const buttons = document.createElement('div');
+			buttons.className = 'tqc-add-buttons';
+			
+			const saveBtn = document.createElement('button');
+			saveBtn.className = 'tqc-add-btn save';
+			saveBtn.textContent = 'Add Command';
+			
+			const cancelBtn = document.createElement('button');
+			cancelBtn.className = 'tqc-add-btn';
+			cancelBtn.textContent = 'Cancel';
+			
+			buttons.appendChild(saveBtn);
+			buttons.appendChild(cancelBtn);
+			form.appendChild(labelInput);
+			form.appendChild(textInput);
+			form.appendChild(buttons);
+			
+			// Find section header and insert form after it
+			const sectionHeaders = body.querySelectorAll('.tqc-section-title');
+			if (sectionHeaders[sectionIndex]) {
+				const spacer = sectionHeaders[sectionIndex].nextElementSibling;
+				if (spacer) {
+					spacer.insertAdjacentElement('afterend', form);
+				} else {
+					body.appendChild(form);
+				}
+			} else {
+				body.appendChild(form);
+			}
+			
+			labelInput.focus();
+			
+			saveBtn.addEventListener('click', async () => {
+				const label = labelInput.value.trim();
+				const text = textInput.value.trim();
+				if (!label || !text) return;
+				
+				const active = await loadActiveProfile();
+				const sections = Array.isArray(active?.sections) ? active.sections : [];
+				if (sections[sectionIndex]) {
+					sections[sectionIndex].items.push({ label, text });
+					await saveProfileSections(sections);
+				}
+				
+				form.remove();
+				await render();
+			});
+			
+			cancelBtn.addEventListener('click', () => form.remove());
+			
+			[labelInput, textInput].forEach(input => {
+				input.addEventListener('keydown', (e) => {
+					if (e.key === 'Enter') saveBtn.click();
+					if (e.key === 'Escape') cancelBtn.click();
+				});
+			});
+		}
+		
+		async function saveProfileSections(sections) {
+			const { tqcProfiles, tqcActiveProfileId } = await safeSyncGet(['tqcProfiles', 'tqcActiveProfileId']);
+			const profiles = tqcProfiles || {};
+			const activeId = tqcActiveProfileId || 'default';
+			
+			profiles[activeId] = {
+				...(profiles[activeId] || {}),
+				sections: sections
+			};
+			
+			await safeSyncSet({ tqcProfiles: profiles });
+		}
 
 		return container;
 	}
