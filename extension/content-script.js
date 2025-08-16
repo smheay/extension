@@ -235,8 +235,15 @@
 
 	async function loadActiveProfile() {
 		const { tqcProfiles, tqcActiveProfileId } = await safeSyncGet(['tqcProfiles', 'tqcActiveProfileId']);
+		
+		// DEBUG: Log what we're loading from storage
+		console.log('🔍 LOADING PROFILE FROM STORAGE:', { tqcProfiles, tqcActiveProfileId });
+		
 		if (tqcProfiles && tqcActiveProfileId && tqcProfiles[tqcActiveProfileId]) {
 			const prof = tqcProfiles[tqcActiveProfileId];
+			console.log('📝 PROFILE SECTIONS COUNT:', prof.sections?.length || 0);
+			console.log('📋 PROFILE SECTIONS:', prof.sections);
+			
 			return {
 				id: tqcActiveProfileId,
 				name: prof.name || 'Default',
@@ -262,15 +269,18 @@
 	async function saveOverlayPosition(pos) { await safeLocalSet({ tqcOverlayPos: pos }); }
 
 	function ensureStyles(root) {
-		if (root.querySelector('#tqc-style')) return;
+		// Remove old styles first
+		const oldStyle = root.querySelector('#tqc-style');
+		if (oldStyle) oldStyle.remove();
+		
 		const style = document.createElement('style');
 		style.id = 'tqc-style';
 		style.textContent = `
-			.tqc-overlay{position:fixed;z-index:2147483646;background:#111827cc;color:#e5e7eb;border:1px solid #374151;border-radius:8px;backdrop-filter:saturate(120%) blur(2px);box-shadow:0 6px 20px rgba(0,0,0,.45);width:320px;}
+			.tqc-overlay{position:fixed;z-index:2147483646;background:#111827cc;color:#e5e7eb;border:1px solid #374151;border-radius:8px;backdrop-filter:saturate(120%) blur(2px);box-shadow:0 6px 20px rgba(0,0,0,.45);width:320px;max-height:90vh;overflow-y:auto;}
 			.tqc-header{cursor:move;display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:#0b1220cc;border-bottom:1px solid #374151;border-top-left-radius:8px;border-top-right-radius:8px;user-select:none}
 			.tqc-title{font-size:13px;margin:0;display:flex;gap:8px;align-items:center}
 			.tqc-select{border:1px solid #374151;background:#111827;color:#e5e7eb;border-radius:6px;padding:6px 8px;font-size:12px}
-			.tqc-body{padding:10px;display:grid;grid-template-columns:repeat(2,1fr);gap:8px;max-height:50vh;overflow:auto}
+			.tqc-body{padding:10px;display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
 			.tqc-btn{border:1px solid #374151;border-radius:6px;background:#111827;color:#e5e7eb;padding:8px 10px;font-size:12px;text-align:center;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:opacity 0.2s ease}
 			.tqc-btn:hover{background:#0f172acc}
 			.tqc-close{background:transparent;border:none;color:#9ca3af;cursor:pointer;font-size:14px}
@@ -286,6 +296,12 @@
 			.tqc-add-btn.save{background:linear-gradient(135deg,#16a34a 0%,#15803d 100%);border-color:#15803d;color:#fff;box-shadow:0 2px 6px rgba(22,163,74,0.3)}
 			.tqc-add-btn:hover{transform:translateY(-1px);box-shadow:0 4px 8px rgba(0,0,0,0.3)}
 			.tqc-add-btn.save:hover{box-shadow:0 4px 12px rgba(22,163,74,0.4)}
+			
+			/* Custom scrollbar for overlay */
+			.tqc-overlay::-webkit-scrollbar{width:6px;}
+			.tqc-overlay::-webkit-scrollbar-track{background:transparent;}
+			.tqc-overlay::-webkit-scrollbar-thumb{background:#374151;border-radius:3px;}
+			.tqc-overlay::-webkit-scrollbar-thumb:hover{background:#4b5563;}
 		`;
 		root.appendChild(style);
 	}
@@ -402,18 +418,37 @@
 		}
 
 
+		let isRendering = false; // Prevent multiple simultaneous renders
+		
 		async function render() {
-			const cmds = await loadCommands();
-			body.innerHTML = '';
-
-			const active = await loadActiveProfile();
-			const seenTitles = new Set();
-			let sections = (Array.isArray(active?.sections) ? active.sections : []).filter(sec => {
-				const title = (sec?.title || 'Section').trim();
-				if (seenTitles.has(title.toLowerCase())) return false;
-				seenTitles.add(title.toLowerCase());
-				return true;
-			});
+			if (isRendering) {
+				console.log('🎨 RENDER BLOCKED - Already rendering');
+				return;
+			}
+			
+			isRendering = true;
+			console.log('🎨 RENDER STARTED');
+			
+			try {
+				const cmds = await loadCommands();
+				
+				// Force clear the body completely
+				while (body.firstChild) {
+					body.removeChild(body.firstChild);
+				}
+				
+				const active = await loadActiveProfile();
+				console.log('🎨 RENDER - RAW SECTIONS FROM STORAGE:', active.sections?.length || 0);
+				
+				const seenTitles = new Set();
+				let sections = (Array.isArray(active?.sections) ? active.sections : []).filter(sec => {
+					const title = (sec?.title || 'Section').trim();
+					if (seenTitles.has(title.toLowerCase())) return false;
+					seenTitles.add(title.toLowerCase());
+					return true;
+				});
+				
+				console.log('🎨 RENDER - FINAL SECTIONS TO DISPLAY:', sections.length);
 			
 			sections.forEach((sec, secIdx) => {
 				const title = (sec.title || 'Section').trim();
@@ -463,13 +498,17 @@
 			});
 
 
-			if (body.children.length === 0) {
-				const empty = document.createElement('div');
-				empty.style.gridColumn = '1 / -1';
-				empty.style.color = '#9ca3af';
-				empty.style.fontSize = '12px';
-				empty.textContent = 'No commands. Use extension options.';
-				body.appendChild(empty);
+				if (body.children.length === 0) {
+					const empty = document.createElement('div');
+					empty.style.gridColumn = '1 / -1';
+					empty.style.color = '#9ca3af';
+					empty.style.fontSize = '12px';
+					empty.textContent = 'No commands. Use extension options.';
+					body.appendChild(empty);
+				}
+			} finally {
+				isRendering = false;
+				console.log('🎨 RENDER COMPLETED');
 			}
 		}
 		await hydrateProfileSelect();
@@ -477,10 +516,12 @@
 		
 		chrome.storage.onChanged.addListener(async (changes, area) => {
 			if (area === 'sync' && (changes.tqcProfiles || changes.tqcActiveProfileId)) {
-				if (!isUpdatingProfile) {
+				if (!isUpdatingProfile && !isRendering) {
+					console.log('📡 STORAGE CHANGED - Triggering refresh');
 					await hydrateProfileSelect();
-					body.innerHTML = ''; // Clear before re-rendering
 					await render();
+				} else {
+					console.log('📡 STORAGE CHANGED - Blocked (updating or rendering)');
 				}
 				return;
 			}
@@ -623,10 +664,17 @@
 			const profiles = tqcProfiles || {};
 			const activeId = tqcActiveProfileId || 'default';
 			
+			// DEBUG: Log what we're saving
+			console.log('💾 SAVING SECTIONS COUNT:', sections.length);
+			console.log('💾 SAVING SECTIONS:', sections);
+			console.log('💾 EXISTING PROFILE:', profiles[activeId]);
+			
 			profiles[activeId] = {
 				...(profiles[activeId] || {}),
 				sections: sections
 			};
+			
+			console.log('💾 FINAL PROFILE TO SAVE:', profiles[activeId]);
 			
 			await safeSyncSet({ tqcProfiles: profiles });
 		}

@@ -119,35 +119,26 @@ chrome.runtime.onInstalled.addListener(async () => {
 });
 
 async function ensureProfiles() {
-	const { tqcProfiles, tqcActiveProfileId } = await chrome.storage.sync.get(["tqcProfiles","tqcActiveProfileId"]);
-	if (!tqcProfiles || typeof tqcProfiles !== 'object') return;
-	let mutated = false;
-	const profiles = { ...tqcProfiles };
+	// DISABLED: This was causing section duplication bugs
+	// Only run on fresh installs via onInstalled listener
+	return;
+}
 
-	// Ensure default profile has friendly name
-	if (profiles.default && profiles.default.name !== 'Game commands') {
-		profiles.default = { ...profiles.default, name: 'Game commands' };
-		mutated = true;
-	}
-
-	// Ensure Emotes profile exists with same sections-first layout
-	if (!profiles.emotes) {
-		profiles.emotes = createEmotesProfile();
-		mutated = true;
-	}
-
-	// Seed default sections for the 'default' profile if missing or incomplete
-	if (profiles.default && (!Array.isArray(profiles.default.sections) || profiles.default.sections.length < 3)) {
-		profiles.default = { 
-			...profiles.default,
-			...createDefaultGameProfile()
-		};
-		mutated = true;
-	}
-
-	if (mutated) {
-		await chrome.storage.sync.set({ tqcProfiles: profiles, tqcActiveProfileId: tqcActiveProfileId || 'default' });
-	}
+// DEBUG: Function to completely clean and reset profiles to eliminate duplicates
+async function cleanResetProfiles() {
+	console.log('🧹 CLEANING AND RESETTING PROFILES - ELIMINATING DUPLICATES');
+	
+	const cleanProfiles = {
+		default: createDefaultGameProfile(),
+		emotes: createEmotesProfile()
+	};
+	
+	await chrome.storage.sync.set({ 
+		tqcProfiles: cleanProfiles, 
+		tqcActiveProfileId: 'default' 
+	});
+	
+	console.log('✅ PROFILES CLEANED - DUPLICATES ELIMINATED');
 }
 
 chrome.runtime.onInstalled.addListener(async (details) => {
@@ -159,6 +150,19 @@ chrome.runtime.onInstalled.addListener(async (details) => {
 
 // Handle all messages
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+	// Handle complete profile cleanup (DEBUG)
+	if (message && message.type === 'CLEAN_RESET_PROFILES') {
+		(async () => {
+			try {
+				await cleanResetProfiles();
+				sendResponse({ ok: true });
+			} catch (error) {
+				sendResponse({ ok: false, error: error.message });
+			}
+		})();
+		return true; // Will respond asynchronously
+	}
+	
 	// Handle recreation of Game commands profile
 	if (message && message.type === 'RECREATE_GAME_PROFILE') {
 		(async () => {

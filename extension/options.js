@@ -340,6 +340,24 @@ document.getElementById("deleteProfile").addEventListener("click", async () => {
 	await hydrateProfilesUI();
 });
 
+document.getElementById("cleanReset").addEventListener("click", async () => {
+	if (!confirm("⚠️ EMERGENCY CLEAN RESET\n\nThis will completely delete ALL profiles and recreate clean defaults.\nThis should fix any duplication bugs.\n\nAre you sure?")) {
+		return;
+	}
+	
+	try {
+		const response = await chrome.runtime.sendMessage({ type: 'CLEAN_RESET_PROFILES' });
+		if (response?.ok) {
+			alert("✅ Profiles cleaned and reset! Duplication bugs should be fixed.");
+			await hydrateProfilesUI();
+		} else {
+			alert("❌ Reset failed: " + (response?.error || "Unknown error"));
+		}
+	} catch (error) {
+		alert("❌ Reset failed: " + error.message);
+	}
+});
+
 async function hydrateProfilesUI() {
 	const { profiles, activeId } = await loadProfiles();
 	const select = document.getElementById('profileSelect');
