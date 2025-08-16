@@ -124,6 +124,13 @@ h1 {
 	contain: layout;
 }
 .row {
+	/* Flexbox fallback for older browsers */
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-height: 40px;
+	
+	/* Modern grid layout */
 	display: grid;
 	grid-template-columns: 24px minmax(120px, 1fr) minmax(200px, 2fr) 24px 24px;
 	gap: 8px;

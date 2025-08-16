@@ -1,4 +1,10 @@
 (function () {
+	// Constants for timing and behavior
+	const CHAT_INPUT_WAIT_TIMEOUT_MS = 2000; // Max time to wait for chat input to appear
+	const CHAT_INPUT_POLL_INTERVAL_MS = 200; // How often to check for chat input
+	const INPUT_SYNC_DELAY_MS = 150; // Time to wait for React/Slate to sync before sending
+	const PROFILE_UPDATE_RESET_DELAY_MS = 100; // Delay to reset profile update flag
+	const INPUT_VALUE_CHECK_INTERVAL_MS = 50; // How often to check if input value matches expected
 	function queryAllDeep(root, selectors) {
 		const results = [];
 		const queue = [root];
@@ -9,20 +15,17 @@
 				try {
 					const found = node.querySelectorAll ? node.querySelectorAll(sel) : [];
 					for (const el of found) results.push(el);
-				} catch {}
+				} catch (e) {}
 			}
-			// Shadow DOM
 			if (node.shadowRoot) queue.push(node.shadowRoot);
-			// Child elements
 			if (node.children) {
 				for (const child of node.children) queue.push(child);
 			}
-			// Same-origin iframes
 			if (node.tagName === 'IFRAME') {
 				try {
 					const doc = node.contentDocument;
 					if (doc) queue.push(doc);
-				} catch {}
+				} catch (e) {}
 			}
 		}
 		return results;
@@ -114,7 +117,7 @@
 		const start = Date.now();
 		let el = findTwitchChatInput();
 		while (!el && Date.now() - start < timeoutMs) {
-			await new Promise(r => setTimeout(r, 200));
+			await new Promise(r => setTimeout(r, CHAT_INPUT_POLL_INTERVAL_MS));
 			el = findTwitchChatInput();
 		}
 		return el;
@@ -128,14 +131,18 @@
 		const start = Date.now();
 		let current = getInputCurrentText(input);
 		while (current !== expected && Date.now() - start < timeoutMs) {
-			await new Promise(r => setTimeout(r, 50));
+			await new Promise(r => setTimeout(r, INPUT_VALUE_CHECK_INTERVAL_MS));
 			current = getInputCurrentText(input);
 		}
 		return current === expected;
 	}
 
 	function isExtensionAlive() {
-		try { return !!(chrome && chrome.runtime && chrome.runtime.id); } catch { return false; }
+		try { 
+			return !!(chrome && chrome.runtime && chrome.runtime.id); 
+		} catch (e) { 
+			return false; 
+		}
 	}
 
 	async function safeSyncGet(keys) {
@@ -151,7 +158,7 @@
 		try {
 			if (!isExtensionAlive()) return;
 			await chrome.storage.sync.set(obj);
-		} catch {}
+		} catch (e) {}
 	}
 
 	async function safeLocalGet(keys) {
@@ -167,25 +174,27 @@
 		try {
 			if (!isExtensionAlive()) return;
 			await chrome.storage.local.set(obj);
-		} catch {}
+		} catch (e) {}
 	}
 
 	async function sendChatMessage(text) {
-		const input = await waitForChatInput(2000);
+		const input = await waitForChatInput(CHAT_INPUT_WAIT_TIMEOUT_MS);
 		if (!input) {
 			return { ok: false, error: 'Chat input not found' };
 		}
 		clickActivateContainer(input);
 		input.focus();
 		setNativeValue(input, text);
-		// Give Slate/React a moment to sync, then send with one click
-		await new Promise(r => setTimeout(r, 150));
-		// Prefer clicking the Chat/Send button to avoid duplicate sends.
+
+		await new Promise(r => setTimeout(r, INPUT_SYNC_DELAY_MS));
+
 		let sendBtn = findNearbySendButton(input) || document.querySelector('button[aria-label="Chat"],button[aria-label="Send message"],button[type="submit"],button[data-a-target="chat-send-button"]');
 		if (sendBtn) {
-			try { sendBtn.click(); } catch {}
+			try { 
+				sendBtn.click(); 
+			} catch (e) {}
 		}
-		// Fallback to Enter in case the click did not submit
+
 		if (!sendBtn) {
 			const keydown = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'Enter', code: 'Enter', keyCode: 13, which: 13 });
 			const keypress = new KeyboardEvent('keypress', { bubbles: true, cancelable: true, key: 'Enter', code: 'Enter', keyCode: 13, which: 13 });
@@ -343,33 +352,29 @@
 				profileSelect.appendChild(opt);
 			});
 			profileSelect.onchange = async () => {
-				isUpdatingProfile = true; // Set flag to prevent storage listener from also rendering
+				isUpdatingProfile = true;
 				await safeSyncSet({ tqcActiveProfileId: profileSelect.value });
-				// Rebuild the body container to avoid duplicate children after rerender
+		
 				body.textContent = '';
 				await render();
-				// Reset flag after a brief delay to ensure storage listener doesn't fire
-				setTimeout(() => { isUpdatingProfile = false; }, 100);
+
+				setTimeout(() => { isUpdatingProfile = false; }, PROFILE_UPDATE_RESET_DELAY_MS);
 			};
 		}
 
-		// Render commands and sections
+
 		async function render() {
 			const cmds = await loadCommands();
 			body.innerHTML = '';
 
-			// Per-profile sections: render any profile-defined sections; remaining commands go to Other
 			const active = await loadActiveProfile();
 			const seenTitles = new Set();
 			let sections = (Array.isArray(active?.sections) ? active.sections : []).filter(sec => {
 				const title = (sec?.title || 'Section').trim();
-				if (seenTitles.has(title.toLowerCase())) return false; // de-dupe same title
+				if (seenTitles.has(title.toLowerCase())) return false;
 				seenTitles.add(title.toLowerCase());
 				return true;
 			});
-
-			const toKey = (s) => String(s || '').trim().toLowerCase();
-			// Render sections with their items only (no implicit Other)
 			
 			sections.forEach(sec => {
 				const title = (sec.title || 'Section').trim();
@@ -398,7 +403,7 @@
 				});
 			});
 
-			// If nothing was rendered at all, show helper
+
 			if (body.children.length === 0) {
 				const empty = document.createElement('div');
 				empty.style.gridColumn = '1 / -1';
