@@ -123,18 +123,7 @@ async function ensureProfiles() {
 	return;
 }
 
-// Function to completely clean and reset profiles to eliminate duplicates
-async function cleanResetProfiles() {
-	const cleanProfiles = {
-		default: createDefaultGameProfile(),
-		emotes: createEmotesProfile()
-	};
-	
-	await chrome.storage.sync.set({ 
-		tqcProfiles: cleanProfiles, 
-		tqcActiveProfileId: 'default' 
-	});
-}
+
 
 chrome.runtime.onInstalled.addListener(async (details) => {
 	// Only setup profiles on fresh install, not on updates
@@ -145,19 +134,6 @@ chrome.runtime.onInstalled.addListener(async (details) => {
 
 // Handle all messages - consolidated single listener
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-	// Handle complete profile cleanup
-	if (message && message.type === 'CLEAN_RESET_PROFILES') {
-		(async () => {
-			try {
-				await cleanResetProfiles();
-				sendResponse({ ok: true });
-			} catch (error) {
-				sendResponse({ ok: false, error: error.message });
-			}
-		})();
-		return true;
-	}
-	
 	// Handle recreation of Game commands profile
 	if (message && message.type === 'RECREATE_GAME_PROFILE') {
 		(async () => {
