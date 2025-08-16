@@ -5,6 +5,11 @@
 	const INPUT_SYNC_DELAY_MS = 150; // Time to wait for React/Slate to sync before sending
 	const PROFILE_UPDATE_RESET_DELAY_MS = 100; // Delay to reset profile update flag
 	const INPUT_VALUE_CHECK_INTERVAL_MS = 50; // How often to check if input value matches expected
+	const COMMAND_COOLDOWN_MS = 500; // Prevent spam clicking commands
+	
+	// Track command cooldowns to prevent spam
+	let lastCommandTime = 0;
+	
 	function queryAllDeep(root, selectors) {
 		const results = [];
 		const queue = [root];
@@ -266,7 +271,7 @@
 			.tqc-title{font-size:13px;margin:0;display:flex;gap:8px;align-items:center}
 			.tqc-select{border:1px solid #374151;background:#111827;color:#e5e7eb;border-radius:6px;padding:6px 8px;font-size:12px}
 			.tqc-body{padding:10px;display:grid;grid-template-columns:repeat(2,1fr);gap:8px;max-height:50vh;overflow:auto}
-			.tqc-btn{border:1px solid #374151;border-radius:6px;background:#111827;color:#e5e7eb;padding:8px 10px;font-size:12px;text-align:center;cursor:pointer;display:flex;align-items:center;justify-content:center}
+			.tqc-btn{border:1px solid #374151;border-radius:6px;background:#111827;color:#e5e7eb;padding:8px 10px;font-size:12px;text-align:center;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:opacity 0.2s ease}
 			.tqc-btn:hover{background:#0f172acc}
 			.tqc-close{background:transparent;border:none;color:#9ca3af;cursor:pointer;font-size:14px}
 			.tqc-section-title{grid-column:1/-1 !important;font-size:11px;color:#9ca3af;margin:4px 0 0 0;text-transform:uppercase;letter-spacing:.04em;display:flex;justify-content:space-between;align-items:center}
@@ -440,6 +445,17 @@
 					btn.className = 'tqc-btn';
 					btn.textContent = item.label || item.text || '(unnamed)';
 					btn.addEventListener('click', async () => {
+						const now = Date.now();
+						if (now - lastCommandTime < COMMAND_COOLDOWN_MS) {
+							// Show visual feedback that command is on cooldown
+							btn.style.opacity = '0.5';
+							setTimeout(() => {
+								btn.style.opacity = '1';
+							}, 200);
+							return;
+						}
+						
+						lastCommandTime = now;
 						await sendChatMessage(item.text || '');
 					});
 					body.appendChild(btn);
