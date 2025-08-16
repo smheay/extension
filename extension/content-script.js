@@ -54,6 +54,13 @@
 	}
 
 	function setNativeValue(element, value) {
+		if (!element) {
+			throw new Error('Element is required for setNativeValue');
+		}
+		if (value === null || value === undefined) {
+			value = '';
+		}
+		
 		if (element.isContentEditable) {
 			element.focus();
 			// Select all existing content inside the editor
@@ -183,46 +190,65 @@
 	}
 
 	async function sendChatMessage(text) {
+		if (!text || typeof text !== 'string') {
+			return { ok: false, error: 'Invalid text parameter' };
+		}
+		
 		const input = await waitForChatInput(CHAT_INPUT_WAIT_TIMEOUT_MS);
 		if (!input) {
 			return { ok: false, error: 'Chat input not found' };
 		}
-		clickActivateContainer(input);
-		input.focus();
-		setNativeValue(input, text);
+		
+		try {
+			clickActivateContainer(input);
+			input.focus();
+			setNativeValue(input, text);
 
-		await new Promise(r => setTimeout(r, INPUT_SYNC_DELAY_MS));
+			await new Promise(r => setTimeout(r, INPUT_SYNC_DELAY_MS));
 
-		let sendBtn = findNearbySendButton(input) || document.querySelector('button[aria-label="Chat"],button[aria-label="Send message"],button[type="submit"],button[data-a-target="chat-send-button"]');
-		if (sendBtn) {
-			try { 
-				sendBtn.click(); 
-			} catch (e) {}
+			let sendBtn = findNearbySendButton(input) || document.querySelector('button[aria-label="Chat"],button[aria-label="Send message"],button[type="submit"],button[data-a-target="chat-send-button"]');
+			if (sendBtn) {
+				try { 
+					sendBtn.click(); 
+				} catch (e) {
+					// Fallback to keyboard events if click fails
+				}
+			}
+
+			if (!sendBtn) {
+				const keydown = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'Enter', code: 'Enter', keyCode: 13, which: 13 });
+				const keypress = new KeyboardEvent('keypress', { bubbles: true, cancelable: true, key: 'Enter', code: 'Enter', keyCode: 13, which: 13 });
+				const keyup = new KeyboardEvent('keyup', { bubbles: true, cancelable: true, key: 'Enter', code: 'Enter', keyCode: 13, which: 13 });
+				input.dispatchEvent(keydown);
+				input.dispatchEvent(keypress);
+				input.dispatchEvent(keyup);
+			}
+			return { ok: true };
+		} catch (error) {
+			return { ok: false, error: `Failed to send message: ${error.message}` };
 		}
-
-		if (!sendBtn) {
-			const keydown = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'Enter', code: 'Enter', keyCode: 13, which: 13 });
-			const keypress = new KeyboardEvent('keypress', { bubbles: true, cancelable: true, key: 'Enter', code: 'Enter', keyCode: 13, which: 13 });
-			const keyup = new KeyboardEvent('keyup', { bubbles: true, cancelable: true, key: 'Enter', code: 'Enter', keyCode: 13, which: 13 });
-			input.dispatchEvent(keydown);
-			input.dispatchEvent(keypress);
-			input.dispatchEvent(keyup);
-		}
-		return { ok: true };
 	}
 
 	chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 		if (message && message.type === 'TWITCH_INSERT_AND_SEND') {
 			(async () => {
-				const result = await sendChatMessage(message.text || '');
-				sendResponse(result);
+				try {
+					const result = await sendChatMessage(message.text || '');
+					sendResponse(result);
+				} catch (error) {
+					sendResponse({ ok: false, error: error.message });
+				}
 			})();
 			return true;
 		}
 
 		if (message && message.type === 'TQC_TOGGLE_OVERLAY') {
-			toggleOverlay();
-			sendResponse && sendResponse({ ok: true });
+			try {
+				toggleOverlay();
+				sendResponse && sendResponse({ ok: true });
+			} catch (error) {
+				sendResponse && sendResponse({ ok: false, error: error.message });
+			}
 			return true;
 		}
 	});
@@ -541,16 +567,35 @@
 			titleInput.focus();
 			
 			saveBtn.addEventListener('click', async () => {
-				const title = titleInput.value.trim();
-				if (!title) return;
-				
-				const active = await loadActiveProfile();
-				const sections = Array.isArray(active?.sections) ? active.sections : [];
-				sections.push({ title, items: [] });
-				
-				await saveProfileSections(sections);
-				form.remove();
-				await render();
+				try {
+					const title = titleInput.value.trim();
+					if (!title || title.length === 0) {
+						titleInput.focus();
+						return;
+					}
+					if (title.length > 100) {
+						alert('Section title too long (max 100 characters)');
+						return;
+					}
+					
+					const active = await loadActiveProfile();
+					const sections = Array.isArray(active?.sections) ? active.sections : [];
+					
+					// Check for duplicate section names
+					if (sections.some(s => s.title?.toLowerCase() === title.toLowerCase())) {
+						alert('Section name already exists');
+						titleInput.focus();
+						return;
+					}
+					
+					sections.push({ title, items: [] });
+					
+					await saveProfileSections(sections);
+					form.remove();
+					await render();
+				} catch (error) {
+					console.error('Failed to add section:', error);
+				}
 			});
 			
 			cancelBtn.addEventListener('click', () => form.remove());
@@ -610,19 +655,46 @@
 			labelInput.focus();
 			
 			saveBtn.addEventListener('click', async () => {
-				const label = labelInput.value.trim();
-				const text = textInput.value.trim();
-				if (!label || !text) return;
-				
-				const active = await loadActiveProfile();
-				const sections = Array.isArray(active?.sections) ? active.sections : [];
-				if (sections[sectionIndex]) {
-					sections[sectionIndex].items.push({ label, text });
-					await saveProfileSections(sections);
+				try {
+					const label = labelInput.value.trim();
+					const text = textInput.value.trim();
+					
+					if (!label || label.length === 0) {
+						labelInput.focus();
+						return;
+					}
+					if (!text || text.length === 0) {
+						textInput.focus();
+						return;
+					}
+					if (label.length > 50) {
+						alert('Command label too long (max 50 characters)');
+						return;
+					}
+					if (text.length > 500) {
+						alert('Command text too long (max 500 characters)');
+						return;
+					}
+					
+					const active = await loadActiveProfile();
+					const sections = Array.isArray(active?.sections) ? active.sections : [];
+					if (sections[sectionIndex]) {
+						// Check for duplicate labels in the same section
+						if (sections[sectionIndex].items?.some(item => item.label?.toLowerCase() === label.toLowerCase())) {
+							alert('Command label already exists in this section');
+							labelInput.focus();
+							return;
+						}
+						
+						sections[sectionIndex].items.push({ label, text });
+						await saveProfileSections(sections);
+					}
+					
+					form.remove();
+					await render();
+				} catch (error) {
+					console.error('Failed to add command:', error);
 				}
-				
-				form.remove();
-				await render();
 			});
 			
 			cancelBtn.addEventListener('click', () => form.remove());

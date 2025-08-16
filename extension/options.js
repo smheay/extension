@@ -53,7 +53,9 @@ async function renderSectionsEditor(list) {
 
 		sec.items = Array.isArray(sec.items) ? sec.items : [];
 		const renderItems = () => {
-			Array.from(list.querySelectorAll(`.item-row[data-sec="${idx}"]`)).forEach(n => n.remove());
+			// More efficient: remove only existing items for this section
+			const existingItems = list.querySelectorAll(`.item-row[data-sec="${idx}"]`);
+			existingItems.forEach(n => n.remove());
 			let insertAfter = headerRow;
 			
 			sec.items.forEach((item, itemIdx) => {
@@ -204,14 +206,20 @@ async function renderSectionsEditor(list) {
 
 
 function captureCurrentSections() {
-	const sectionHeaders = Array.from(document.querySelectorAll('#sectionsList .section-header'));
-	return sectionHeaders.map((headerEl, idx) => {
+	const sectionsList = document.getElementById('sectionsList');
+	if (!sectionsList) return [];
+	
+	const sectionHeaders = sectionsList.querySelectorAll('.section-header');
+	return Array.from(sectionHeaders).map((headerEl, idx) => {
 		const titleInput = headerEl.querySelector('input');
 		const title = (titleInput?.value || '').trim() || 'Section';
-		const items = Array.from(document.querySelectorAll(`#sectionsList .item-row[data-sec="${idx}"]`)).map(row => {
+		
+		// Use more efficient selector - avoid document-wide search
+		const items = Array.from(sectionsList.querySelectorAll(`.item-row[data-sec="${idx}"]`)).map(row => {
 			const inputs = row.querySelectorAll('input');
 			return { label: inputs[0]?.value || '', text: inputs[1]?.value || '' };
 		}).filter(i => (i.text || '').trim().length > 0);
+		
 		return { title, items };
 	});
 }
@@ -247,18 +255,28 @@ async function autoSave() {
 	autoSaveTimeout = setTimeout(async () => {
 		try {
 			const { profiles, activeId } = await loadProfiles();
+			if (!profiles || !activeId) {
+				console.error('Auto-save: Invalid profiles or activeId');
+				return;
+			}
+			
 			const builtSections = captureCurrentSections();
+			if (!Array.isArray(builtSections)) {
+				console.error('Auto-save: Invalid sections data');
+				return;
+			}
 			
 			const existingProfile = profiles[activeId] || createDefaultProfile();
-	profiles[activeId] = { 
-		...existingProfile, 
-		sections: builtSections
+			profiles[activeId] = { 
+				...existingProfile, 
+				sections: builtSections
 			};
 			
 			await saveProfiles(profiles, activeId);
 			showNotification("Auto-saved", 800);
 		} catch (error) {
 			console.error('Auto-save failed:', error);
+			showNotification("Auto-save failed", 2000);
 		}
 	}, AUTO_SAVE_DELAY_MS);
 }

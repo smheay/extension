@@ -197,18 +197,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 	// Handle toggle overlay from popup
 	if (message && message.type === 'TQC_TOGGLE_OVERLAY_FROM_POPUP') {
 		(async () => {
-			const tabResult = await getActiveTwitchTab();
-			if (tabResult.error) {
-				sendResponse({ ok: false });
-				return;
-			}
+			try {
+				const tabResult = await getActiveTwitchTab();
+				if (tabResult.error) {
+					sendResponse({ ok: false, error: tabResult.error });
+					return;
+				}
 
-			const result = await ensureContentScriptAndSendMessage(
-				tabResult.tab.id, 
-				{ type: 'TQC_TOGGLE_OVERLAY' }
-			);
-			
-			sendResponse({ ok: result.ok, error: result.error });
+				const result = await ensureContentScriptAndSendMessage(
+					tabResult.tab.id, 
+					{ type: 'TQC_TOGGLE_OVERLAY' }
+				);
+				
+				sendResponse({ ok: result.ok, error: result.error });
+			} catch (error) {
+				sendResponse({ ok: false, error: error.message });
+			}
 		})();
 		return true;
 	}
@@ -216,18 +220,27 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 	// Handle send-command requests from popup
 	if (message && message.type === "SEND_TWITCH_MESSAGE") {
 		(async () => {
-			const tabResult = await getActiveTwitchTab();
-			if (tabResult.error) {
-				sendResponse({ ok: false, error: tabResult.error });
-				return;
-			}
+			try {
+				if (!message.text || typeof message.text !== 'string') {
+					sendResponse({ ok: false, error: 'Invalid message text' });
+					return;
+				}
 
-			const result = await ensureContentScriptAndSendMessage(
-				tabResult.tab.id, 
-				{ type: "TWITCH_INSERT_AND_SEND", text: message.text }
-			);
-			
-			sendResponse(result.ok ? result.response : { ok: false, error: result.error });
+				const tabResult = await getActiveTwitchTab();
+				if (tabResult.error) {
+					sendResponse({ ok: false, error: tabResult.error });
+					return;
+				}
+
+				const result = await ensureContentScriptAndSendMessage(
+					tabResult.tab.id, 
+					{ type: "TWITCH_INSERT_AND_SEND", text: message.text }
+				);
+				
+				sendResponse(result.ok ? result.response : { ok: false, error: result.error });
+			} catch (error) {
+				sendResponse({ ok: false, error: error.message });
+			}
 		})();
 		return true;
 	}
@@ -239,13 +252,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 chrome.commands?.onCommand.addListener(async (command) => {
 	if (command !== 'toggle-overlay') return;
 	
-	const tabResult = await getActiveTwitchTab();
-	if (tabResult.error) return; // Silently fail for keyboard shortcuts
-	
-	await ensureContentScriptAndSendMessage(
-		tabResult.tab.id, 
-		{ type: 'TQC_TOGGLE_OVERLAY' }
-	);
+	try {
+		const tabResult = await getActiveTwitchTab();
+		if (tabResult.error) return; // Silently fail for keyboard shortcuts
+		
+		await ensureContentScriptAndSendMessage(
+			tabResult.tab.id, 
+			{ type: 'TQC_TOGGLE_OVERLAY' }
+		);
+	} catch (error) {
+		// Silently fail for keyboard shortcuts - no user feedback needed
+	}
 });
 
 
