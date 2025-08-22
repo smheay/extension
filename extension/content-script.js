@@ -1,11 +1,21 @@
 (function () {
 	// Constants for timing and behavior
+	// Timing constants for chat input detection and interaction
 	const CHAT_INPUT_WAIT_TIMEOUT_MS = 2000; // Max time to wait for chat input to appear
 	const CHAT_INPUT_POLL_INTERVAL_MS = 200; // How often to check for chat input
 	const INPUT_SYNC_DELAY_MS = 150; // Time to wait for React/Slate to sync before sending
+	const FOCUS_SETTLE_DELAY_MS = 100; // Time to wait for focus to settle
+	const RETRY_DELAY_MS = 100; // Delay before retrying failed operations
+	const COMMAND_RELEASE_DELAY_MS = 100; // Delay before releasing command lock
+	const SPAM_FEEDBACK_DURATION_MS = 300; // Duration to show spam protection feedback
+	
+	// Profile and overlay constants
 	const PROFILE_UPDATE_RESET_DELAY_MS = 100; // Delay to reset profile update flag
-	const INPUT_VALUE_CHECK_INTERVAL_MS = 50; // How often to check if input value matches expected
-	const COMMAND_COOLDOWN_MS = 750; // Prevent spam clicking commands (increased)
+	const COMMAND_COOLDOWN_MS = 750; // Prevent spam clicking commands
+	
+	// DOM traversal constants
+	const MAX_PARENT_TRAVERSAL_DEPTH = 5; // Max depth when looking for parent elements
+	const MAX_CONTAINER_SEARCH_DEPTH = 4; // Max depth when searching for containers
 	
 	// Global command cooldown - blocks ALL commands during cooldown
 	let lastCommandTime = 0;
@@ -54,57 +64,11 @@
 		return all[0] || null;
 	}
 
-	function setNativeValue(element, value) {
-		if (!element) {
-			throw new Error('Element is required for setNativeValue');
-		}
-		if (value === null || value === undefined) {
-			value = '';
-		}
-		
-		if (element.isContentEditable) {
-			element.focus();
-			// Select all existing content inside the editor
-			const range = document.createRange();
-			range.selectNodeContents(element);
-			const sel = window.getSelection();
-			sel?.removeAllRanges();
-			sel?.addRange(range);
-			// Clear via beforeinput delete
-			try {
-				const delEv = new InputEvent('beforeinput', { bubbles: true, cancelable: true, inputType: 'deleteContentBackward' });
-				element.dispatchEvent(delEv);
-				element.dispatchEvent(new InputEvent('input', { bubbles: true }));
-				// Insert full text in one operation so Slate sets value correctly
-				const pasteEv = new InputEvent('beforeinput', { bubbles: true, cancelable: true, inputType: 'insertFromPaste', data: String(value) });
-				element.dispatchEvent(pasteEv);
-				element.dispatchEvent(new InputEvent('input', { bubbles: true, data: String(value) }));
-			} catch {
-				// Fallback: type characters one by one
-				for (const ch of String(value)) {
-					const ev = new InputEvent('beforeinput', { bubbles: true, cancelable: true, inputType: 'insertText', data: ch });
-					element.dispatchEvent(ev);
-					element.dispatchEvent(new InputEvent('input', { bubbles: true, data: ch }));
-				}
-			}
-			return;
-		}
-		const valueSetter = Object.getOwnPropertyDescriptor(element, 'value')?.set;
-		const prototype = Object.getPrototypeOf(element);
-		const prototypeValueSetter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
-		if (prototypeValueSetter && valueSetter !== prototypeValueSetter) {
-			prototypeValueSetter.call(element, value);
-		} else if (valueSetter) {
-			valueSetter.call(element, value);
-		} else {
-			element.value = value;
-		}
-		element.dispatchEvent(new Event('input', { bubbles: true }));
-	}
+
 
 	function clickActivateContainer(inputEl) {
 		let node = inputEl;
-		for (let i = 0; i < 4 && node; i++) {
+		for (let i = 0; i < MAX_CONTAINER_SEARCH_DEPTH && node; i++) {
 			const container = node.closest ? node.closest('[data-a-target="chat-input"]') : null;
 			if (container) {
 				container.click();
@@ -118,7 +82,7 @@
 
 	function findNearbySendButton(start) {
 		let node = start;
-		for (let i = 0; i < 5 && node; i++) {
+		for (let i = 0; i < MAX_PARENT_TRAVERSAL_DEPTH && node; i++) {
 			const btn = node.querySelector ? node.querySelector('[data-a-target="chat-send-button"]') : null;
 			if (btn) return btn;
 			node = node.parentElement;
@@ -140,15 +104,26 @@
 		return input.isContentEditable ? (input.textContent || "") : (input.value || "");
 	}
 
-	async function waitUntilInputEquals(input, expected, timeoutMs) {
-		const start = Date.now();
-		let current = getInputCurrentText(input);
-		while (current !== expected && Date.now() - start < timeoutMs) {
-			await new Promise(r => setTimeout(r, INPUT_VALUE_CHECK_INTERVAL_MS));
-			current = getInputCurrentText(input);
-		}
-		return current === expected;
+	/**
+	 * Dispatches Enter key events to trigger chat message sending
+	 * @param {HTMLElement} element - The input element to dispatch events to
+	 */
+	function dispatchEnterKeyEvents(element) {
+		const enterEventConfig = {
+			bubbles: true,
+			cancelable: true,
+			key: 'Enter',
+			code: 'Enter',
+			keyCode: 13,
+			which: 13
+		};
+
+		element.dispatchEvent(new KeyboardEvent('keydown', enterEventConfig));
+		element.dispatchEvent(new KeyboardEvent('keypress', enterEventConfig));
+		element.dispatchEvent(new KeyboardEvent('keyup', enterEventConfig));
 	}
+
+
 
 	function isExtensionAlive() {
 		try { 
@@ -201,29 +176,84 @@
 		}
 		
 		try {
+			// Activate the input container first
 			clickActivateContainer(input);
+			
+			// Focus the input
 			input.focus();
-			setNativeValue(input, text);
-
+			
+			// Wait for focus to settle
+			await new Promise(r => setTimeout(r, FOCUS_SETTLE_DELAY_MS));
+			
+			// For contenteditable elements (Twitch uses Slate.js), we need to handle this carefully
+			if (input.isContentEditable) {
+				// Clear any existing content first
+				input.textContent = '';
+				
+				// Set the new text content
+				input.textContent = text;
+				
+				// Trigger the necessary events for Slate.js to recognize the change
+				input.dispatchEvent(new Event('input', { bubbles: true }));
+				input.dispatchEvent(new Event('change', { bubbles: true }));
+				
+				// Also trigger a composition event which Slate.js listens for
+				input.dispatchEvent(new CompositionEvent('compositionend', { 
+					bubbles: true, 
+					data: text 
+				}));
+			} else {
+				// For regular inputs
+				input.value = text;
+				input.dispatchEvent(new Event('input', { bubbles: true }));
+				input.dispatchEvent(new Event('change', { bubbles: true }));
+			}
+			
+			// Wait for the input to sync with React/Slate
 			await new Promise(r => setTimeout(r, INPUT_SYNC_DELAY_MS));
-
-			let sendBtn = findNearbySendButton(input) || document.querySelector('button[aria-label="Chat"],button[aria-label="Send message"],button[type="submit"],button[data-a-target="chat-send-button"]');
-			if (sendBtn) {
-				try { 
-					sendBtn.click(); 
+			
+			// Verify the text was set correctly and retry if needed
+			const currentText = input.isContentEditable ? input.textContent : input.value;
+			
+			if (currentText !== text && input.isContentEditable) {
+				// Fallback: try to set it again with a different approach
+				input.focus();
+				input.innerHTML = '';
+				input.textContent = text;
+				
+				// Trigger events again
+				input.dispatchEvent(new Event('input', { bubbles: true }));
+				input.dispatchEvent(new Event('change', { bubbles: true }));
+				
+				await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
+			}
+			
+			// Try to find and click send button - refactored to be cleaner
+			const sendButtonSelectors = [
+				() => findNearbySendButton(input),
+				() => document.querySelector('button[aria-label="Chat"]'),
+				() => document.querySelector('button[aria-label="Send message"]'),
+				() => document.querySelector('button[type="submit"]'),
+				() => document.querySelector('button[data-a-target="chat-send-button"]')
+			];
+			
+			let sendBtn = null;
+			for (const selector of sendButtonSelectors) {
+				try {
+					sendBtn = selector();
+					if (sendBtn) break;
 				} catch (e) {
-					// Fallback to keyboard events if click fails
+					continue;
 				}
 			}
-
-			if (!sendBtn) {
-				const keydown = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'Enter', code: 'Enter', keyCode: 13, which: 13 });
-				const keypress = new KeyboardEvent('keypress', { bubbles: true, cancelable: true, key: 'Enter', code: 'Enter', keyCode: 13, which: 13 });
-				const keyup = new KeyboardEvent('keyup', { bubbles: true, cancelable: true, key: 'Enter', code: 'Enter', keyCode: 13, which: 13 });
-				input.dispatchEvent(keydown);
-				input.dispatchEvent(keypress);
-				input.dispatchEvent(keyup);
+			
+			if (sendBtn) {
+				sendBtn.click();
+			} else {
+				// Use Enter key as fallback
+				dispatchEnterKeyEvents(input);
 			}
+			
 			return { ok: true };
 		} catch (error) {
 			return { ok: false, error: `Failed to send message: ${error.message}` };
@@ -415,8 +445,9 @@
 		let isUpdatingProfile = false; // Flag to prevent double-rendering during profile changes
 
 		async function hydrateProfileSelect() {
-			const { tqcProfiles, tqcActiveProfileId } = await safeSyncGet(['tqcProfiles','tqcActiveProfileId']);
-			const profiles = tqcProfiles || {}; const activeId = tqcActiveProfileId || 'default';
+					const { tqcProfiles, tqcActiveProfileId } = await safeSyncGet(['tqcProfiles','tqcActiveProfileId']);
+		const profiles = tqcProfiles || {};
+		const activeId = tqcActiveProfileId || 'default';
 			profileSelect.innerHTML = '';
 			Object.entries(profiles).forEach(([id, prof]) => {
 				const opt = document.createElement('option');
@@ -500,7 +531,7 @@
 							setTimeout(() => {
 								btn.style.opacity = '1';
 								btn.style.transform = 'scale(1)';
-							}, 300);
+							}, SPAM_FEEDBACK_DURATION_MS);
 							return;
 						}
 						
@@ -514,7 +545,7 @@
 							// Release lock after command completes
 							setTimeout(() => {
 								isCommandInProgress = false;
-							}, 100);
+							}, COMMAND_RELEASE_DELAY_MS);
 						}
 					});
 					body.appendChild(btn);
