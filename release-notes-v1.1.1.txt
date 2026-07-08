@@ -1,0 +1,31 @@
+Version 1.1.1 - Performance & Reliability Update
+
+MAJOR IMPROVEMENTS:
+- Enhanced Chat Message Reliability - Completely rewritten chat sending system for better compatibility with Twitch's latest updates
+- Improved Performance - Reduced memory usage and faster response times
+- Better Error Handling - More robust error recovery and user feedback
+- Code Quality Improvements - Professional-grade code architecture for long-term stability
+
+TECHNICAL ENHANCEMENTS:
+- Optimized DOM manipulation for better browser performance
+- Reduced extension size and load times
+- Improved event handling for React-based Twitch interface
+- Enhanced spam protection with visual feedback
+- Better keyboard shortcut reliability
+
+BUG FIXES:
+- Fixed occasional chat message sending failures
+- Improved input field detection on various Twitch layouts
+- Better handling of contenteditable chat inputs
+- More reliable overlay positioning and persistence
+
+UNDER THE HOOD:
+- Cleaner, more maintainable codebase
+- Removed unnecessary debug logging for production
+- Optimized constants and reduced magic numbers
+- Better code documentation and structure
+
+DEPLOYMENT INFORMATION:
+- Package: twitch-quick-commands-v1.1.1.zip
+- Version: 1.1.1
+- Size: 20,113 bytes

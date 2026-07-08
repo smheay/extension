@@ -101,7 +101,99 @@
 	}
 
 	function getInputCurrentText(input) {
-		return input.isContentEditable ? (input.textContent || "") : (input.value || "");
+		if (!input) return '';
+		if (input.value != null && typeof input.value === 'string') {
+			return input.value;
+		}
+		return (input.textContent || '').replace(/\uFEFF/g, '');
+	}
+
+	function getReactInstance(element) {
+		if (!element) return null;
+		for (const key in element) {
+			if (key.startsWith('__reactInternalInstance$') || key.startsWith('__reactFiber$')) {
+				return element[key];
+			}
+		}
+		return null;
+	}
+
+	function searchReactParents(node, predicate, maxDepth = 15, depth = 0) {
+		try {
+			if (predicate(node)) return node;
+		} catch (e) {}
+		if (!node || depth > maxDepth) return null;
+		const parent = node.return;
+		if (parent) return searchReactParents(parent, predicate, maxDepth, depth + 1);
+		return null;
+	}
+
+	function getCurrentChatComponent() {
+		const roots = [
+			document.querySelector('section[data-test-selector="chat-room-component-layout"]'),
+			document.querySelector('.stream-chat'),
+			document.querySelector('[data-a-target="chat-input"]')
+		].filter(Boolean);
+
+		for (const root of roots) {
+			const node = searchReactParents(
+				getReactInstance(root),
+				(n) => n.stateNode && n.stateNode.props && typeof n.stateNode.props.onSendMessage === 'function'
+			);
+			if (node && node.stateNode) return node.stateNode;
+		}
+		return null;
+	}
+
+	function getChatInputComponent(inputEl) {
+		const element = inputEl || document.querySelector('[data-a-target="chat-input"]');
+		if (!element) return null;
+		return searchReactParents(
+			getReactInstance(element),
+			(n) => n.memoizedProps && n.memoizedProps.componentType != null && n.memoizedProps.value != null
+		);
+	}
+
+	function trySendViaReact(text) {
+		const currentChat = getCurrentChatComponent();
+		if (!currentChat || typeof currentChat.props.onSendMessage !== 'function') {
+			return false;
+		}
+		try {
+			currentChat.props.onSendMessage(text);
+			return true;
+		} catch (e) {
+			return false;
+		}
+	}
+
+	function trySetInputViaReact(text, inputEl) {
+		const chatInput = getChatInputComponent(inputEl);
+		if (!chatInput || !chatInput.memoizedProps) return false;
+		try {
+			const props = chatInput.memoizedProps;
+			props.value = text;
+			if (typeof props.setInputValue === 'function') props.setInputValue(text);
+			if (typeof props.onValueUpdate === 'function') props.onValueUpdate(text);
+			return true;
+		} catch (e) {
+			return false;
+		}
+	}
+
+	function isSendButtonEnabled(button) {
+		if (!button) return false;
+		return !button.disabled && button.getAttribute('aria-disabled') !== 'true';
+	}
+
+	async function waitForSendButtonEnabled(input, timeoutMs = 1000) {
+		const start = Date.now();
+		while (Date.now() - start < timeoutMs) {
+			const sendBtn = findNearbySendButton(input) || document.querySelector('[data-a-target="chat-send-button"]');
+			if (isSendButtonEnabled(sendBtn)) return sendBtn;
+			await new Promise(r => setTimeout(r, CHAT_INPUT_POLL_INTERVAL_MS));
+		}
+		return null;
 	}
 
 	/**
@@ -169,91 +261,69 @@
 		if (!text || typeof text !== 'string') {
 			return { ok: false, error: 'Invalid text parameter' };
 		}
-		
+
+		// Best path: call Twitch's onSendMessage directly (ignores any draft in the box)
+		if (trySendViaReact(text)) {
+			return { ok: true };
+		}
+
 		const input = await waitForChatInput(CHAT_INPUT_WAIT_TIMEOUT_MS);
 		if (!input) {
 			return { ok: false, error: 'Chat input not found' };
 		}
-		
+
 		try {
-			// Activate the input container first
 			clickActivateContainer(input);
-			
-			// Focus the input
 			input.focus();
-			
-			// Wait for focus to settle
 			await new Promise(r => setTimeout(r, FOCUS_SETTLE_DELAY_MS));
-			
-			// For contenteditable elements (Twitch uses Slate.js), we need to handle this carefully
-			if (input.isContentEditable) {
-				// Clear any existing content first
-				input.textContent = '';
-				
-				// Set the new text content
-				input.textContent = text;
-				
-				// Trigger the necessary events for Slate.js to recognize the change
-				input.dispatchEvent(new Event('input', { bubbles: true }));
-				input.dispatchEvent(new Event('change', { bubbles: true }));
-				
-				// Also trigger a composition event which Slate.js listens for
-				input.dispatchEvent(new CompositionEvent('compositionend', { 
-					bubbles: true, 
-					data: text 
-				}));
-			} else {
-				// For regular inputs
-				input.value = text;
-				input.dispatchEvent(new Event('input', { bubbles: true }));
-				input.dispatchEvent(new Event('change', { bubbles: true }));
-			}
-			
-			// Wait for the input to sync with React/Slate
-			await new Promise(r => setTimeout(r, INPUT_SYNC_DELAY_MS));
-			
-			// Verify the text was set correctly and retry if needed
-			const currentText = input.isContentEditable ? input.textContent : input.value;
-			
-			if (currentText !== text && input.isContentEditable) {
-				// Fallback: try to set it again with a different approach
-				input.focus();
-				input.innerHTML = '';
-				input.textContent = text;
-				
-				// Trigger events again
-				input.dispatchEvent(new Event('input', { bubbles: true }));
-				input.dispatchEvent(new Event('change', { bubbles: true }));
-				
-				await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
-			}
-			
-			// Try to find and click send button - refactored to be cleaner
-			const sendButtonSelectors = [
-				() => findNearbySendButton(input),
-				() => document.querySelector('button[aria-label="Chat"]'),
-				() => document.querySelector('button[aria-label="Send message"]'),
-				() => document.querySelector('button[type="submit"]'),
-				() => document.querySelector('button[data-a-target="chat-send-button"]')
-			];
-			
-			let sendBtn = null;
-			for (const selector of sendButtonSelectors) {
-				try {
-					sendBtn = selector();
-					if (sendBtn) break;
-				} catch (e) {
-					continue;
+
+			// Sync React/Slate state instead of only mutating the DOM
+			if (!trySetInputViaReact(text, input)) {
+				if (input.isContentEditable) {
+					input.focus();
+					document.execCommand('selectAll', false, null);
+					document.execCommand('delete', false, null);
+					document.execCommand('insertText', false, text);
+				} else {
+					input.value = text;
+					input.dispatchEvent(new Event('input', { bubbles: true }));
+					input.dispatchEvent(new Event('change', { bubbles: true }));
 				}
 			}
-			
-			if (sendBtn) {
+
+			await new Promise(r => setTimeout(r, INPUT_SYNC_DELAY_MS));
+
+			const currentText = getInputCurrentText(input);
+			if (currentText !== text) {
+				trySetInputViaReact(text, input);
+				await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
+			}
+
+			let sendBtn = await waitForSendButtonEnabled(input);
+			if (!sendBtn) {
+				const sendButtonSelectors = [
+					() => findNearbySendButton(input),
+					() => document.querySelector('button[aria-label="Send message"]'),
+					() => document.querySelector('button[data-a-target="chat-send-button"]')
+				];
+				for (const selector of sendButtonSelectors) {
+					try {
+						sendBtn = selector();
+						if (sendBtn) break;
+					} catch (e) {
+						continue;
+					}
+				}
+			}
+
+			if (isSendButtonEnabled(sendBtn)) {
 				sendBtn.click();
+			} else if (trySendViaReact(text)) {
+				return { ok: true };
 			} else {
-				// Use Enter key as fallback
 				dispatchEnterKeyEvents(input);
 			}
-			
+
 			return { ok: true };
 		} catch (error) {
 			return { ok: false, error: `Failed to send message: ${error.message}` };

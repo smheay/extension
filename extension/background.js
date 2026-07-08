@@ -1,41 +1,40 @@
 // Default profile data - shared across multiple functions to avoid duplication
 const DEFAULT_GAME_SECTIONS = [
 	{
+		title: 'Core Commands',
+		items: [
+			{ label: 'Join', text: '!join' },
+			{ label: 'Spawn (10s cd)', text: '!spawn' },
+			{ label: 'Flee (60s cd)', text: '!flee' }
+		]
+	},
+	{
 		title: 'MXP Buffs',
 		items: [
-			{ label: 'HP', text: '!hp' },
-			{ label: 'HPMax', text: '!hpmax' },
-			{ label: 'AOE', text: '!aoe' },
-			{ label: 'AOEMax', text: '!aoemax' },
-			{ label: 'Regen', text: '!regen' },
-			{ label: 'Attack Speed', text: '!attackspeed' },
-			{ label: 'Respawn Speed', text: '!respawnspeed' },
-			{ label: 'Gamble', text: '!gamble' },
-			{ label: 'Speed', text: '!speed' },
-			{ label: 'Aggro', text: '!aggro' }
+			{ label: 'AOE (1)', text: '!aoe' },
+			{ label: 'DMG (1)', text: '!dmg' },
+			{ label: 'HP (1)', text: '!hp' },
+			{ label: 'Speed (1)', text: '!speed' }
 		]
 	},
 	{
-		title: 'Evolutions',
+		title: 'Upgrades',
 		items: [
-			{ label: 'Evolve Woodland Joe', text: '!evolvewoodlandjoe' },
-			{ label: 'Evolve Succubus', text: '!evolvesuccubus' }
+			{ label: 'Boost (0)', text: '!boost' },
+			{ label: 'Explode (0)', text: '!explode' },
+			{ label: 'Invulnerability (0)', text: '!invulnerability' },
+			{ label: 'Unlock Boost (10)', text: '!unlockboost' },
+			{ label: 'Unlock Explode (15)', text: '!unlockexplode' },
+			{ label: 'Unlock Invulnerability (25)', text: '!unlockinvulnerability' }
 		]
 	},
 	{
-		title: 'Basic Commands',
+		title: 'Character Commands',
 		items: [
-			{ label: 'Explode', text: '!explode' },
-			{ label: 'Fart', text: '!fart' },
-			{ label: 'Boost', text: '!boost' }
-		]
-	},
-	{
-		title: 'Voting',
-		items: [
-			{ label: 'Vote 1', text: '!vote1' },
-			{ label: 'Vote 2', text: '!vote2' },
-			{ label: 'Vote 3', text: '!vote3' }
+			{ label: 'Fart (60s cd)', text: '!fart' },
+			{ label: 'Evolve Kevin (15)', text: '!evolvekevin' },
+			{ label: 'Evolve Succubus (25)', text: '!evolvesuccubus' },
+			{ label: 'Evolve Woodland Joe (10)', text: '!evolvewoodlandjoe' }
 		]
 	}
 ];
