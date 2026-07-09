@@ -25,5 +25,6 @@ h1 {
 }
 button#toggleOverlay { border: 1px solid #e5e7eb; border-radius: 6px; padding: 4px 8px; background: #fff; cursor: pointer; font-size: 12px; }
 .hint { color: #6b7280; font-size: 12px; margin: 8px 0 0 0; }
+.error { color: #b91c1c; font-size: 12px; margin: 8px 0 0 0; }
 
 

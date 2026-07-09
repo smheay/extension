@@ -1,11 +1,10 @@
 (function () {
+	if (window.__tqcContentScriptLoaded) {
+		return;
+	}
+	window.__tqcContentScriptLoaded = true;
+
 	// Constants for timing and behavior
-	// Timing constants for chat input detection and interaction
-	const CHAT_INPUT_WAIT_TIMEOUT_MS = 2000; // Max time to wait for chat input to appear
-	const CHAT_INPUT_POLL_INTERVAL_MS = 200; // How often to check for chat input
-	const INPUT_SYNC_DELAY_MS = 150; // Time to wait for React/Slate to sync before sending
-	const FOCUS_SETTLE_DELAY_MS = 100; // Time to wait for focus to settle
-	const RETRY_DELAY_MS = 100; // Delay before retrying failed operations
 	const COMMAND_RELEASE_DELAY_MS = 100; // Delay before releasing command lock
 	const SPAM_FEEDBACK_DURATION_MS = 300; // Duration to show spam protection feedback
 	
@@ -13,209 +12,79 @@
 	const PROFILE_UPDATE_RESET_DELAY_MS = 100; // Delay to reset profile update flag
 	const COMMAND_COOLDOWN_MS = 750; // Prevent spam clicking commands
 	
-	// DOM traversal constants
-	const MAX_PARENT_TRAVERSAL_DEPTH = 5; // Max depth when looking for parent elements
-	const MAX_CONTAINER_SEARCH_DEPTH = 4; // Max depth when searching for containers
-	
 	// Global command cooldown - blocks ALL commands during cooldown
 	let lastCommandTime = 0;
 	let isCommandInProgress = false;
-	
-	function queryAllDeep(root, selectors) {
-		const results = [];
-		const queue = [root];
-		while (queue.length) {
-			const node = queue.shift();
-			if (!node) continue;
-			for (const sel of selectors) {
-				try {
-					const found = node.querySelectorAll ? node.querySelectorAll(sel) : [];
-					for (const el of found) results.push(el);
-				} catch (e) {}
-			}
-			if (node.shadowRoot) queue.push(node.shadowRoot);
-			if (node.children) {
-				for (const child of node.children) queue.push(child);
-			}
-			if (node.tagName === 'IFRAME') {
-				try {
-					const doc = node.contentDocument;
-					if (doc) queue.push(doc);
-				} catch (e) {}
-			}
-		}
-		return results;
+
+	const PAGE_BRIDGE_TIMEOUT_MS = 3000;
+	const BRIDGE_TOKEN_ATTR = 'data-tqc-bridge-token';
+
+	function getPageBridgeToken() {
+		return document.documentElement.getAttribute(BRIDGE_TOKEN_ATTR);
 	}
 
-	function findTwitchChatInput() {
-		const selectors = [
-			'textarea[data-a-target="chat-input"]',
-			'[data-a-target="chat-input"] textarea',
-			'div[contenteditable="true"][data-a-target="chat-input"]',
-			'[data-a-target="chat-input"] div[contenteditable="true"]',
-			'[data-a-target="chat-message-input"] textarea',
-			'div.chat-input__textarea textarea',
-			'div[role="textbox"][contenteditable="true"]'
-		];
-		const all = queryAllDeep(document, selectors).filter(el => {
-			const rect = el.getBoundingClientRect();
-			return rect.width > 0 && rect.height > 0;
-		});
-		return all[0] || null;
-	}
-
-
-
-	function clickActivateContainer(inputEl) {
-		let node = inputEl;
-		for (let i = 0; i < MAX_CONTAINER_SEARCH_DEPTH && node; i++) {
-			const container = node.closest ? node.closest('[data-a-target="chat-input"]') : null;
-			if (container) {
-				container.click();
+	function waitForPageBridgeToken(timeoutMs = PAGE_BRIDGE_TIMEOUT_MS) {
+		return new Promise((resolve) => {
+			const existing = getPageBridgeToken();
+			if (existing) {
+				resolve(existing);
 				return;
 			}
-			node = node.parentElement;
-		}
-		// Generic click on input itself
-		inputEl.click();
+
+			const observer = new MutationObserver(() => {
+				const token = getPageBridgeToken();
+				if (token) {
+					observer.disconnect();
+					clearTimeout(timeout);
+					resolve(token);
+				}
+			});
+			observer.observe(document.documentElement, {
+				attributes: true,
+				attributeFilter: [BRIDGE_TOKEN_ATTR]
+			});
+
+			const timeout = setTimeout(() => {
+				observer.disconnect();
+				resolve(getPageBridgeToken());
+			}, timeoutMs);
+		});
 	}
 
-	function findNearbySendButton(start) {
-		let node = start;
-		for (let i = 0; i < MAX_PARENT_TRAVERSAL_DEPTH && node; i++) {
-			const btn = node.querySelector ? node.querySelector('[data-a-target="chat-send-button"]') : null;
-			if (btn) return btn;
-			node = node.parentElement;
+	async function sendChatMessageViaPageBridge(text) {
+		const bridgeToken = await waitForPageBridgeToken();
+		if (!bridgeToken) {
+			return { ok: false, error: 'Chat bridge not ready' };
 		}
-		return document.querySelector('[data-a-target="chat-send-button"]');
-	}
 
-	async function waitForChatInput(timeoutMs) {
-		const start = Date.now();
-		let el = findTwitchChatInput();
-		while (!el && Date.now() - start < timeoutMs) {
-			await new Promise(r => setTimeout(r, CHAT_INPUT_POLL_INTERVAL_MS));
-			el = findTwitchChatInput();
-		}
-		return el;
-	}
+		return new Promise((resolve) => {
+			const requestId = `${Date.now()}-${Math.random()}`;
+			const timeout = setTimeout(() => {
+				window.removeEventListener('message', handler);
+				resolve({ ok: false, error: 'Chat send timed out' });
+			}, PAGE_BRIDGE_TIMEOUT_MS);
 
-	function getInputCurrentText(input) {
-		if (!input) return '';
-		if (input.value != null && typeof input.value === 'string') {
-			return input.value;
-		}
-		return (input.textContent || '').replace(/\uFEFF/g, '');
-	}
-
-	function getReactInstance(element) {
-		if (!element) return null;
-		for (const key in element) {
-			if (key.startsWith('__reactInternalInstance$') || key.startsWith('__reactFiber$')) {
-				return element[key];
+			function handler(event) {
+				if (
+					event.source !== window ||
+					event.data?.type !== 'TQC_CHAT_RESULT' ||
+					event.data?.requestId !== requestId ||
+					event.data?.token !== bridgeToken
+				) {
+					return;
+				}
+				clearTimeout(timeout);
+				window.removeEventListener('message', handler);
+				resolve({
+					ok: !!event.data.ok,
+					error: event.data.error
+				});
 			}
-		}
-		return null;
+
+			window.addEventListener('message', handler);
+			window.postMessage({ type: 'TQC_SEND_CHAT', text, requestId, token: bridgeToken }, '*');
+		});
 	}
-
-	function searchReactParents(node, predicate, maxDepth = 15, depth = 0) {
-		try {
-			if (predicate(node)) return node;
-		} catch (e) {}
-		if (!node || depth > maxDepth) return null;
-		const parent = node.return;
-		if (parent) return searchReactParents(parent, predicate, maxDepth, depth + 1);
-		return null;
-	}
-
-	function getCurrentChatComponent() {
-		const roots = [
-			document.querySelector('section[data-test-selector="chat-room-component-layout"]'),
-			document.querySelector('.stream-chat'),
-			document.querySelector('[data-a-target="chat-input"]')
-		].filter(Boolean);
-
-		for (const root of roots) {
-			const node = searchReactParents(
-				getReactInstance(root),
-				(n) => n.stateNode && n.stateNode.props && typeof n.stateNode.props.onSendMessage === 'function'
-			);
-			if (node && node.stateNode) return node.stateNode;
-		}
-		return null;
-	}
-
-	function getChatInputComponent(inputEl) {
-		const element = inputEl || document.querySelector('[data-a-target="chat-input"]');
-		if (!element) return null;
-		return searchReactParents(
-			getReactInstance(element),
-			(n) => n.memoizedProps && n.memoizedProps.componentType != null && n.memoizedProps.value != null
-		);
-	}
-
-	function trySendViaReact(text) {
-		const currentChat = getCurrentChatComponent();
-		if (!currentChat || typeof currentChat.props.onSendMessage !== 'function') {
-			return false;
-		}
-		try {
-			currentChat.props.onSendMessage(text);
-			return true;
-		} catch (e) {
-			return false;
-		}
-	}
-
-	function trySetInputViaReact(text, inputEl) {
-		const chatInput = getChatInputComponent(inputEl);
-		if (!chatInput || !chatInput.memoizedProps) return false;
-		try {
-			const props = chatInput.memoizedProps;
-			props.value = text;
-			if (typeof props.setInputValue === 'function') props.setInputValue(text);
-			if (typeof props.onValueUpdate === 'function') props.onValueUpdate(text);
-			return true;
-		} catch (e) {
-			return false;
-		}
-	}
-
-	function isSendButtonEnabled(button) {
-		if (!button) return false;
-		return !button.disabled && button.getAttribute('aria-disabled') !== 'true';
-	}
-
-	async function waitForSendButtonEnabled(input, timeoutMs = 1000) {
-		const start = Date.now();
-		while (Date.now() - start < timeoutMs) {
-			const sendBtn = findNearbySendButton(input) || document.querySelector('[data-a-target="chat-send-button"]');
-			if (isSendButtonEnabled(sendBtn)) return sendBtn;
-			await new Promise(r => setTimeout(r, CHAT_INPUT_POLL_INTERVAL_MS));
-		}
-		return null;
-	}
-
-	/**
-	 * Dispatches Enter key events to trigger chat message sending
-	 * @param {HTMLElement} element - The input element to dispatch events to
-	 */
-	function dispatchEnterKeyEvents(element) {
-		const enterEventConfig = {
-			bubbles: true,
-			cancelable: true,
-			key: 'Enter',
-			code: 'Enter',
-			keyCode: 13,
-			which: 13
-		};
-
-		element.dispatchEvent(new KeyboardEvent('keydown', enterEventConfig));
-		element.dispatchEvent(new KeyboardEvent('keypress', enterEventConfig));
-		element.dispatchEvent(new KeyboardEvent('keyup', enterEventConfig));
-	}
-
-
 
 	function isExtensionAlive() {
 		try { 
@@ -262,87 +131,10 @@
 			return { ok: false, error: 'Invalid text parameter' };
 		}
 
-		// Best path: call Twitch's onSendMessage directly (ignores any draft in the box)
-		if (trySendViaReact(text)) {
-			return { ok: true };
-		}
-
-		const input = await waitForChatInput(CHAT_INPUT_WAIT_TIMEOUT_MS);
-		if (!input) {
-			return { ok: false, error: 'Chat input not found' };
-		}
-
-		try {
-			clickActivateContainer(input);
-			input.focus();
-			await new Promise(r => setTimeout(r, FOCUS_SETTLE_DELAY_MS));
-
-			// Sync React/Slate state instead of only mutating the DOM
-			if (!trySetInputViaReact(text, input)) {
-				if (input.isContentEditable) {
-					input.focus();
-					document.execCommand('selectAll', false, null);
-					document.execCommand('delete', false, null);
-					document.execCommand('insertText', false, text);
-				} else {
-					input.value = text;
-					input.dispatchEvent(new Event('input', { bubbles: true }));
-					input.dispatchEvent(new Event('change', { bubbles: true }));
-				}
-			}
-
-			await new Promise(r => setTimeout(r, INPUT_SYNC_DELAY_MS));
-
-			const currentText = getInputCurrentText(input);
-			if (currentText !== text) {
-				trySetInputViaReact(text, input);
-				await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
-			}
-
-			let sendBtn = await waitForSendButtonEnabled(input);
-			if (!sendBtn) {
-				const sendButtonSelectors = [
-					() => findNearbySendButton(input),
-					() => document.querySelector('button[aria-label="Send message"]'),
-					() => document.querySelector('button[data-a-target="chat-send-button"]')
-				];
-				for (const selector of sendButtonSelectors) {
-					try {
-						sendBtn = selector();
-						if (sendBtn) break;
-					} catch (e) {
-						continue;
-					}
-				}
-			}
-
-			if (isSendButtonEnabled(sendBtn)) {
-				sendBtn.click();
-			} else if (trySendViaReact(text)) {
-				return { ok: true };
-			} else {
-				dispatchEnterKeyEvents(input);
-			}
-
-			return { ok: true };
-		} catch (error) {
-			return { ok: false, error: `Failed to send message: ${error.message}` };
-		}
+		return sendChatMessageViaPageBridge(text);
 	}
 
 	chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-		if (message && message.type === 'TWITCH_INSERT_AND_SEND') {
-			(async () => {
-				try {
-					const result = await sendChatMessage(message.text || '');
-					sendResponse(result);
-				} catch (error) {
-					sendResponse({ ok: false, error: error.message });
-				}
-			})();
-			return true;
-		}
-
 		if (message && message.type === 'TQC_TOGGLE_OVERLAY') {
 			try {
 				toggleOverlay();
@@ -359,6 +151,21 @@
 	// ---------------------------
 	let overlayRoot = null;
 	let overlayMove = { dragging: false, offsetX: 0, offsetY: 0 };
+	let overlayController = null;
+
+	chrome.storage.onChanged.addListener(async (changes, area) => {
+		if (area !== 'sync' || !(changes.tqcProfiles || changes.tqcActiveProfileId)) {
+			return;
+		}
+		if (!overlayController || !document.body.contains(overlayRoot)) {
+			return;
+		}
+		if (overlayController.isUpdatingProfile || overlayController.isRendering) {
+			return;
+		}
+		await overlayController.hydrateProfileSelect();
+		await overlayController.render();
+	});
 
 	async function loadActiveProfile() {
 		const { tqcProfiles, tqcActiveProfileId } = await safeSyncGet(['tqcProfiles', 'tqcActiveProfileId']);
@@ -434,12 +241,9 @@
 		header.className = 'tqc-header';
 		const title = document.createElement('div');
 		title.className = 'tqc-title';
-		const titleText = document.createElement('span');
-		titleText.textContent = '';
 		const profileSelect = document.createElement('select');
 		profileSelect.className = 'tqc-select';
 		profileSelect.title = 'Switch list';
-		title.appendChild(titleText);
 		title.appendChild(profileSelect);
 		const addBtn = document.createElement('button');
 		addBtn.className = 'tqc-close';
@@ -552,21 +356,23 @@
 				}
 				
 				const active = await loadActiveProfile();
-				
-				const seenTitles = new Set();
-				let sections = (Array.isArray(active?.sections) ? active.sections : []).filter(sec => {
-					const title = (sec?.title || 'Section').trim();
-					if (seenTitles.has(title.toLowerCase())) return false;
-					seenTitles.add(title.toLowerCase());
-					return true;
-				});
-			
-			sections.forEach((sec, secIdx) => {
-				const title = (sec.title || 'Section').trim();
+
+				const titleCounts = {};
+				const sectionEntries = (Array.isArray(active?.sections) ? active.sections : [])
+					.map((sec, originalIndex) => ({ sec, originalIndex }));
+
+			sectionEntries.forEach(({ sec, originalIndex }) => {
+				const baseTitle = (sec.title || 'Section').trim();
+				const titleKey = baseTitle.toLowerCase();
+				titleCounts[titleKey] = (titleCounts[titleKey] || 0) + 1;
+				const title = titleCounts[titleKey] > 1
+					? `${baseTitle} (${titleCounts[titleKey]})`
+					: baseTitle;
 				const items = Array.isArray(sec.items) ? sec.items : [];
 				
 				const headerEl = document.createElement('div');
 				headerEl.className = 'tqc-section-title';
+				headerEl.dataset.sectionIndex = String(originalIndex);
 				
 				const titleSpan = document.createElement('span');
 				titleSpan.textContent = title;
@@ -575,7 +381,7 @@
 				addSectionBtn.className = 'tqc-section-add';
 				addSectionBtn.innerHTML = '<span style="display:block;width:100%;height:100%;line-height:18px;text-align:center;">+</span>';
 				addSectionBtn.title = 'Add command to this section';
-				addSectionBtn.addEventListener('click', () => showAddCommandForm(secIdx));
+				addSectionBtn.addEventListener('click', () => showAddCommandForm(originalIndex));
 				
 				headerEl.appendChild(titleSpan);
 				headerEl.appendChild(addSectionBtn);
@@ -637,17 +443,13 @@
 		}
 		await hydrateProfileSelect();
 		await render();
-		
-		chrome.storage.onChanged.addListener(async (changes, area) => {
-			if (area === 'sync' && (changes.tqcProfiles || changes.tqcActiveProfileId)) {
-				if (!isUpdatingProfile && !isRendering) {
-					await hydrateProfileSelect();
-					await render();
-				}
-				return;
-			}
 
-		});
+		overlayController = {
+			get isUpdatingProfile() { return isUpdatingProfile; },
+			get isRendering() { return isRendering; },
+			hydrateProfileSelect,
+			render
+		};
 
 		// Add form functions
 		function showAddSectionForm() {
@@ -710,7 +512,7 @@
 					form.remove();
 					await render();
 				} catch (error) {
-					console.error('Failed to add section:', error);
+					// ignore
 				}
 			});
 			
@@ -755,10 +557,10 @@
 			form.appendChild(textInput);
 			form.appendChild(buttons);
 			
-			// Find section header and insert form after it
-			const sectionHeaders = body.querySelectorAll('.tqc-section-title');
-			if (sectionHeaders[sectionIndex]) {
-				const spacer = sectionHeaders[sectionIndex].nextElementSibling;
+			// Find section header by storage index and insert form after it
+			const sectionHeader = body.querySelector(`.tqc-section-title[data-section-index="${sectionIndex}"]`);
+			if (sectionHeader) {
+				const spacer = sectionHeader.nextElementSibling;
 				if (spacer) {
 					spacer.insertAdjacentElement('afterend', form);
 				} else {
@@ -809,7 +611,7 @@
 					form.remove();
 					await render();
 				} catch (error) {
-					console.error('Failed to add command:', error);
+					// ignore
 				}
 			});
 			

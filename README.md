@@ -58,27 +58,13 @@ A Chrome extension that helps streamers and viewers quickly send predefined comm
 ## 🎮 Default Commands
 
 ### Game Commands
-- **Start Game**: `!startgame`
-- **Stop Game**: `!stopgame`
-- **Reset Game**: `!resetgame`
-- **Join Game**: `!joingame`
-- **Leave Game**: `!leavegame`
-
-### Fun Commands
-- **Explode**: `!explode`
-- **Fart**: `!fart`
-- **Boost**: `!boost`
-
-### Voting
-- **Vote 1**: `!vote1`
-- **Vote 2**: `!vote2`
+- **Core Commands**: `!join`, `!spawn`, `!flee`
+- **MXP Buffs**: `!aoe`, `!aoemax`, `!dmg`, `!dmgmax`, `!hp`, `!hpmax`, `!speed`, `!speedmax`
+- **Upgrades**: `!boost`, `!explode`, `!invulnerability`, unlock commands
+- **Character Commands**: `!fart`, `!evolvekevin`, `!evolvesuccubus`, `!evolvewoodlandjoe`
 
 ### Emotes
-- **Heart**: `❤️`
-- **Thumbs Up**: `👍`
-- **Fire**: `🔥`
-- **GG**: `GG`
-- **KEKW**: `KEKW`
+- **bruhSit**, **BOOBA**, **AwkwardMonkey**, **docnotL**, **fat**
 
 ## ⌨️ Keyboard Shortcuts
 
@@ -109,15 +95,39 @@ A Chrome extension that helps streamers and viewers quickly send predefined comm
 - Check if the extension is enabled in `chrome://extensions/`
 
 **Commands not sending?**
-- Ensure you're focused on the chat input area
+- Hard refresh the Twitch tab after reloading the extension (`Ctrl+Shift+R`)
+- Ensure you're on a Twitch page with chat visible
 - Try clicking in the chat box first
-- Refresh the page if needed
+
+**Reloaded the extension in dev mode?**
+- Reloading at `chrome://extensions` does not update already-open Twitch tabs
+- Hard refresh every open Twitch tab so the latest content scripts load
 
 **Lost custom commands?**
 - Commands are saved automatically and persist between sessions
-- Use "Reset to Defaults" if needed to restore default commands
+- Custom profiles you created are kept when the extension updates
+- The built-in **Game commands** profile is refreshed to the latest default commands on each update
+- Use **Reset to Defaults** on any profile to restore its default command set
 
 ## 📝 Version History
+
+### v1.1.4
+- Refactored chat sending into a three-strategy fallback chain (onSendMessage → slate input → DOM)
+- Page bridge token auth for safer chat postMessage handling
+- Fixed WYSIWYG editor crashes and first-click double-send on fallback paths
+- Game commands profile refreshes on extension update; custom profiles preserved
+- Fixed overlay storage listener leak on SPA navigation
+- Duplicate section titles visible in overlay (labeled Section (2), etc.)
+- Popup error feedback when Panel is used off Twitch; shortcut hint Ctrl+Shift+Y
+
+### v1.1.3
+- Fixed overlay add-command form placement for duplicate section names
+- Removed unused message handlers
+- Game commands profile auto-updates on extension update; custom profiles are preserved
+
+### v1.1.2
+- Reliable chat sending via main-world page bridge (Twitch Slate editor)
+- Profile reset and options page fixes
 
 ### v1.1.0
 - Improved drag and drop reliability

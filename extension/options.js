@@ -2,13 +2,20 @@ async function loadProfiles() {
 	const { tqcProfiles, tqcActiveProfileId } = await chrome.storage.sync.get(["tqcProfiles", "tqcActiveProfileId"]);
 	let profiles = tqcProfiles || {};
 	let activeId = tqcActiveProfileId;
+
+	if (Object.keys(profiles).length === 0) {
+		await new Promise((resolve) => {
+			chrome.runtime.sendMessage({ type: 'SEED_DEFAULT_PROFILES' }, () => resolve());
+		});
+		const seeded = await chrome.storage.sync.get(["tqcProfiles", "tqcActiveProfileId"]);
+		return {
+			profiles: seeded.tqcProfiles || {},
+			activeId: seeded.tqcActiveProfileId || 'default'
+		};
+	}
+
 	if (!activeId) {
-		if (Object.keys(profiles).length === 0) {
-			profiles = { default: createDefaultProfile("Default") };
-			activeId = "default";
-		} else {
-			activeId = Object.keys(profiles)[0];
-		}
+		activeId = Object.keys(profiles)[0];
 		await chrome.storage.sync.set({ tqcProfiles: profiles, tqcActiveProfileId: activeId });
 	}
 	return { profiles, activeId };
@@ -182,7 +189,7 @@ async function renderSectionsEditor(list) {
 							}, DRAG_ITEM_RENDER_DELAY_MS);
 						}
 					} catch (error) {
-						console.error('Drop failed:', error);
+						// ignore
 					}
 				});
 			});
@@ -240,7 +247,6 @@ function showNotification(message, duration = 1000) {
 
 // Constants for timing and UI behavior
 const AUTO_SAVE_DELAY_MS = 500; // Wait time before auto-saving after last change
-const PROFILE_UPDATE_DELAY_MS = 100; // Delay to prevent double-rendering during profile changes
 const DRAG_ITEM_RENDER_DELAY_MS = 10; // Small delay to ensure DOM is ready after drag operations
 const DROP_INDICATOR_CLEANUP_DELAY_MS = 50; // Delay to prevent flicker when moving between elements
 
@@ -256,13 +262,11 @@ async function autoSave() {
 		try {
 			const { profiles, activeId } = await loadProfiles();
 			if (!profiles || !activeId) {
-				console.error('Auto-save: Invalid profiles or activeId');
 				return;
 			}
 			
 			const builtSections = captureCurrentSections();
 			if (!Array.isArray(builtSections)) {
-				console.error('Auto-save: Invalid sections data');
 				return;
 			}
 			
@@ -275,7 +279,6 @@ async function autoSave() {
 			await saveProfiles(profiles, activeId);
 			showNotification("Auto-saved", 800);
 		} catch (error) {
-			console.error('Auto-save failed:', error);
 			showNotification("Auto-save failed", 2000);
 		}
 	}, AUTO_SAVE_DELAY_MS);
@@ -302,40 +305,33 @@ document.getElementById("resetDefaults").addEventListener("click", async () => {
 	const currentProfile = profiles[activeId];
 	const profileName = currentProfile?.name || 'Current profile';
 	
-	if (confirm(`This will reset "${profileName}" to default sections. All current sections and commands will be replaced. Continue?`)) {
-		// Determine which defaults to use based on profile
-		let defaultSections;
-		if (activeId === 'default' || profileName.toLowerCase().includes('game')) {
-			// Use game defaults for 'default' profile or profiles with 'game' in name
-			chrome.runtime.sendMessage({ type: 'RECREATE_GAME_PROFILE' }, async (response) => {
-				if (response?.ok) {
-					alert(`${profileName} reset to default game commands!`);
-					await hydrateProfilesUI();
-				} else {
-					alert('Failed to reset profile');
-				}
-			});
-		} else if (activeId === 'emotes' || profileName.toLowerCase().includes('emote')) {
-			// Use emote defaults for 'emotes' profile or profiles with 'emote' in name
-			chrome.runtime.sendMessage({ type: 'RECREATE_EMOTES_PROFILE' }, async (response) => {
-				if (response?.ok) {
-					alert(`${profileName} reset to default emotes!`);
-					await hydrateProfilesUI();
-				} else {
-					alert('Failed to reset emotes profile');
-				}
-			});
-		} else {
-			// For custom profiles, reset to empty sections
-			profiles[activeId] = {
-				name: profileName,
-				sections: []
-			};
-			await saveProfiles(profiles, activeId);
-			alert(`${profileName} reset to empty state!`);
-			await hydrateProfilesUI();
-		}
+	if (!confirm(`This will reset "${profileName}" to default sections. All current sections and commands will be replaced. Continue?`)) {
+		return;
 	}
+
+	let resetKind = 'empty';
+	if (activeId === 'default' || profileName.toLowerCase().includes('game')) {
+		resetKind = 'game';
+	} else if (activeId === 'emotes' || profileName.toLowerCase().includes('emote')) {
+		resetKind = 'emotes';
+	}
+
+	chrome.runtime.sendMessage(
+		{ type: 'RESET_PROFILE_TO_DEFAULTS', profileId: activeId, resetKind },
+		async (response) => {
+			if (response?.ok) {
+				const resetLabel = resetKind === 'game'
+					? 'default game commands'
+					: resetKind === 'emotes'
+						? 'default emotes'
+						: 'empty state';
+				alert(`${profileName} reset to ${resetLabel}!`);
+				await hydrateProfilesUI();
+			} else {
+				alert('Failed to reset profile');
+			}
+		}
+	);
 });
 
 document.getElementById("addProfile").addEventListener("click", async () => {
@@ -358,6 +354,48 @@ document.getElementById("deleteProfile").addEventListener("click", async () => {
 
 
 
+let globalDragHandlersReady = false;
+
+function ensureGlobalDragHandlers() {
+	if (globalDragHandlersReady) return;
+	globalDragHandlersReady = true;
+
+	document.addEventListener('dragover', (e) => {
+		const target = e.target.closest('.item-row');
+		if (target) {
+			e.preventDefault();
+			document.querySelectorAll('.invalid-drop-zone').forEach(el => {
+				el.classList.remove('invalid-drop-zone');
+			});
+		} else {
+			const sectionHeader = e.target.closest('.section-header');
+			if (sectionHeader) {
+				sectionHeader.classList.add('invalid-drop-zone');
+			}
+		}
+	});
+
+	document.addEventListener('dragleave', (e) => {
+		const sectionHeader = e.target.closest('.section-header');
+		if (sectionHeader) {
+			sectionHeader.classList.remove('invalid-drop-zone');
+		}
+	});
+
+	document.addEventListener('drop', (e) => {
+		e.preventDefault();
+		document.querySelectorAll('.drop-indicator').forEach(el => el.remove());
+		document.querySelectorAll('.invalid-drop-zone').forEach(el => {
+			el.classList.remove('invalid-drop-zone');
+		});
+
+		const target = e.target.closest('.item-row');
+		if (!target) {
+			return false;
+		}
+	});
+}
+
 async function hydrateProfilesUI() {
 	const { profiles, activeId } = await loadProfiles();
 	const select = document.getElementById('profileSelect');
@@ -368,11 +406,12 @@ async function hydrateProfilesUI() {
 		if (id === activeId) opt.selected = true;
 		select.appendChild(opt);
 	});
-	select.addEventListener('change', async () => {
-		await saveProfiles(profiles, select.value);
+	select.onchange = async () => {
+		const nextId = select.value;
 		const latest = await loadProfiles();
-		await hydrateProfilesUI(); // Refresh the entire UI after profile change
-	});
+		await saveProfiles(latest.profiles, nextId);
+		await hydrateProfilesUI();
+	};
 
 	const commandsContainer = document.getElementById("commands");
 	if (commandsContainer) {
@@ -405,56 +444,11 @@ async function hydrateProfilesUI() {
 	
 	document.getElementById('commands').parentNode.appendChild(sectionsContainer);
 
-	// Global drag/drop handlers to prevent accidental drops
-	document.addEventListener('dragover', (e) => {
-		const target = e.target.closest('.item-row');
-		if (target) {
-			// Valid drop zone
-			e.preventDefault();
-			// Remove invalid styling from other elements
-			document.querySelectorAll('.invalid-drop-zone').forEach(el => {
-				el.classList.remove('invalid-drop-zone');
-			});
-		} else {
-			// Invalid drop zone - show visual feedback
-			const sectionHeader = e.target.closest('.section-header');
-			if (sectionHeader) {
-				sectionHeader.classList.add('invalid-drop-zone');
-			}
-		}
-	});
-	
-	document.addEventListener('dragleave', (e) => {
-		// Remove invalid styling when leaving elements
-		const sectionHeader = e.target.closest('.section-header');
-		if (sectionHeader) {
-			sectionHeader.classList.remove('invalid-drop-zone');
-		}
-	});
-	
-	document.addEventListener('drop', (e) => {
-		// Always prevent browser from displaying drag data as text
-		e.preventDefault();
-		
-		// Clean up all visual indicators
-		document.querySelectorAll('.drop-indicator').forEach(el => el.remove());
-		document.querySelectorAll('.invalid-drop-zone').forEach(el => {
-			el.classList.remove('invalid-drop-zone');
-		});
-		
-		// Only allow drops on item rows
-		const target = e.target.closest('.item-row');
-		if (!target) {
-			// Invalid drop area - just clean up and do nothing
-			return false;
-		}
-	});
-
-
 	await renderSectionsEditor(list);
 }
 
 (async () => {
+	ensureGlobalDragHandlers();
 	await hydrateProfilesUI();
 })();
 

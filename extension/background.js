@@ -3,6 +3,7 @@ const DEFAULT_GAME_SECTIONS = [
 	{
 		title: 'Core Commands',
 		items: [
+			{ label: 'Fart (60s cd)', text: '!fart' },
 			{ label: 'Join', text: '!join' },
 			{ label: 'Spawn (10s cd)', text: '!spawn' },
 			{ label: 'Flee (60s cd)', text: '!flee' }
@@ -12,26 +13,29 @@ const DEFAULT_GAME_SECTIONS = [
 		title: 'MXP Buffs',
 		items: [
 			{ label: 'AOE (1)', text: '!aoe' },
+			{ label: 'AOE Max', text: '!aoemax' },
 			{ label: 'DMG (1)', text: '!dmg' },
+			{ label: 'DMG Max', text: '!dmgmax' },
 			{ label: 'HP (1)', text: '!hp' },
-			{ label: 'Speed (1)', text: '!speed' }
+			{ label: 'HP Max', text: '!hpmax' },
+			{ label: 'Speed (1)', text: '!speed' },
+			{ label: 'Speed Max', text: '!speedmax' }
 		]
 	},
 	{
 		title: 'Upgrades',
 		items: [
 			{ label: 'Boost (0)', text: '!boost' },
-			{ label: 'Explode (0)', text: '!explode' },
-			{ label: 'Invulnerability (0)', text: '!invulnerability' },
 			{ label: 'Unlock Boost (10)', text: '!unlockboost' },
+			{ label: 'Explode (0)', text: '!explode' },
 			{ label: 'Unlock Explode (15)', text: '!unlockexplode' },
+			{ label: 'Invulnerability (0)', text: '!invulnerability' },
 			{ label: 'Unlock Invulnerability (25)', text: '!unlockinvulnerability' }
 		]
 	},
 	{
-		title: 'Character Commands',
+		title: 'Evolves Commands',
 		items: [
-			{ label: 'Fart (60s cd)', text: '!fart' },
 			{ label: 'Evolve Kevin (15)', text: '!evolvekevin' },
 			{ label: 'Evolve Succubus (25)', text: '!evolvesuccubus' },
 			{ label: 'Evolve Woodland Joe (10)', text: '!evolvewoodlandjoe' }
@@ -68,6 +72,29 @@ function createEmotesProfile() {
 	};
 }
 
+function resetProfileToGameDefaults(existingProfile = {}) {
+	const defaults = createDefaultGameProfile();
+	return {
+		name: existingProfile.name || defaults.name,
+		sections: defaults.sections
+	};
+}
+
+function resetProfileToEmoteDefaults(existingProfile = {}) {
+	const defaults = createEmotesProfile();
+	return {
+		name: existingProfile.name || defaults.name,
+		sections: defaults.sections
+	};
+}
+
+function createSeedProfiles() {
+	return {
+		default: createDefaultGameProfile(),
+		emotes: createEmotesProfile()
+	};
+}
+
 // Helper functions to reduce duplication
 async function getActiveTwitchTab() {
 	const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
@@ -90,11 +117,16 @@ async function ensureContentScriptAndSendMessage(tabId, message) {
 		const response = await chrome.tabs.sendMessage(tabId, message);
 		return { ok: true, response };
 	} catch (e) {
-		// Content script not loaded, try to inject it
+		// Content script not loaded, try to inject it (main frame only; guard prevents double init)
 		try {
-			await chrome.scripting.executeScript({ 
-				target: { tabId: tabId, allFrames: true }, 
-				files: ["content-script.js"] 
+			await chrome.scripting.executeScript({
+				target: { tabId: tabId, frameIds: [0] },
+				files: ["page-bridge.js"],
+				world: "MAIN"
+			});
+			await chrome.scripting.executeScript({
+				target: { tabId: tabId, frameIds: [0] },
+				files: ["content-script.js"]
 			});
 			const response = await chrome.tabs.sendMessage(tabId, message);
 			return { ok: true, response };
@@ -106,26 +138,33 @@ async function ensureContentScriptAndSendMessage(tabId, message) {
 
 chrome.runtime.onInstalled.addListener(async (details) => {
 	if (details.reason === 'install') {
-		const seedProfiles = {
-			default: createDefaultGameProfile(),
-			emotes: createEmotesProfile()
-		};
-		await chrome.storage.sync.set({ tqcProfiles: seedProfiles, tqcActiveProfileId: 'default' });
+		await chrome.storage.sync.set({
+			tqcProfiles: createSeedProfiles(),
+			tqcActiveProfileId: 'default'
+		});
+		return;
+	}
+
+	if (details.reason === 'update') {
+		const { tqcProfiles, tqcActiveProfileId } = await chrome.storage.sync.get(['tqcProfiles', 'tqcActiveProfileId']);
+		const profiles = tqcProfiles || {};
+		profiles.default = resetProfileToGameDefaults(profiles.default || {});
+		await chrome.storage.sync.set({
+			tqcProfiles: profiles,
+			tqcActiveProfileId: tqcActiveProfileId || 'default'
+		});
 	}
 });
 
 // Handle all messages - consolidated single listener
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-	// Handle recreation of Game commands profile
-	if (message && message.type === 'RECREATE_GAME_PROFILE') {
+	if (message && message.type === 'SEED_DEFAULT_PROFILES') {
 		(async () => {
 			try {
-				const { tqcProfiles } = await chrome.storage.sync.get(['tqcProfiles']);
-				const profiles = tqcProfiles || {};
-				
-				profiles.default = createDefaultGameProfile();
-				
-				await chrome.storage.sync.set({ tqcProfiles: profiles, tqcActiveProfileId: 'default' });
+				await chrome.storage.sync.set({
+					tqcProfiles: createSeedProfiles(),
+					tqcActiveProfileId: 'default'
+				});
 				sendResponse({ ok: true });
 			} catch (error) {
 				sendResponse({ ok: false, error: error.message });
@@ -133,17 +172,58 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 		})();
 		return true;
 	}
-	
-	// Handle recreation of Emotes profile
+
+	if (message && message.type === 'RESET_PROFILE_TO_DEFAULTS') {
+		(async () => {
+			try {
+				const { tqcProfiles, tqcActiveProfileId } = await chrome.storage.sync.get(['tqcProfiles', 'tqcActiveProfileId']);
+				const profiles = tqcProfiles || {};
+				const profileId = message.profileId || tqcActiveProfileId || 'default';
+				const existing = profiles[profileId] || {};
+				const resetKind = message.resetKind;
+
+				if (resetKind === 'game') {
+					profiles[profileId] = resetProfileToGameDefaults(existing);
+				} else if (resetKind === 'emotes') {
+					profiles[profileId] = resetProfileToEmoteDefaults(existing);
+				} else {
+					profiles[profileId] = { name: existing.name || 'Profile', sections: [] };
+				}
+
+				await chrome.storage.sync.set({ tqcProfiles: profiles, tqcActiveProfileId: profileId });
+				sendResponse({ ok: true });
+			} catch (error) {
+				sendResponse({ ok: false, error: error.message });
+			}
+		})();
+		return true;
+	}
+
+	// Backward compatibility for older options pages
+	if (message && message.type === 'RECREATE_GAME_PROFILE') {
+		(async () => {
+			try {
+				const { tqcProfiles, tqcActiveProfileId } = await chrome.storage.sync.get(['tqcProfiles', 'tqcActiveProfileId']);
+				const profiles = tqcProfiles || {};
+				const profileId = message.profileId || tqcActiveProfileId || 'default';
+				profiles[profileId] = resetProfileToGameDefaults(profiles[profileId]);
+				await chrome.storage.sync.set({ tqcProfiles: profiles, tqcActiveProfileId: profileId });
+				sendResponse({ ok: true });
+			} catch (error) {
+				sendResponse({ ok: false, error: error.message });
+			}
+		})();
+		return true;
+	}
+
 	if (message && message.type === 'RECREATE_EMOTES_PROFILE') {
 		(async () => {
 			try {
 				const { tqcProfiles, tqcActiveProfileId } = await chrome.storage.sync.get(['tqcProfiles', 'tqcActiveProfileId']);
 				const profiles = tqcProfiles || {};
-				
-				profiles.emotes = createEmotesProfile();
-				
-				await chrome.storage.sync.set({ tqcProfiles: profiles, tqcActiveProfileId: tqcActiveProfileId });
+				const profileId = message.profileId || tqcActiveProfileId || 'emotes';
+				profiles[profileId] = resetProfileToEmoteDefaults(profiles[profileId]);
+				await chrome.storage.sync.set({ tqcProfiles: profiles, tqcActiveProfileId: profileId });
 				sendResponse({ ok: true });
 			} catch (error) {
 				sendResponse({ ok: false, error: error.message });
@@ -175,35 +255,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 		return true;
 	}
 	
-	// Handle send-command requests from popup
-	if (message && message.type === "SEND_TWITCH_MESSAGE") {
-		(async () => {
-			try {
-				if (!message.text || typeof message.text !== 'string') {
-					sendResponse({ ok: false, error: 'Invalid message text' });
-					return;
-				}
-
-				const tabResult = await getActiveTwitchTab();
-				if (tabResult.error) {
-					sendResponse({ ok: false, error: tabResult.error });
-					return;
-				}
-
-				const result = await ensureContentScriptAndSendMessage(
-					tabResult.tab.id, 
-					{ type: "TWITCH_INSERT_AND_SEND", text: message.text }
-				);
-				
-				sendResponse(result.ok ? result.response : { ok: false, error: result.error });
-			} catch (error) {
-				sendResponse({ ok: false, error: error.message });
-			}
-		})();
-		return true;
-	}
-	
-	return false; // No handler found
+	return false;
 });
 
 // Keyboard shortcut to toggle overlay

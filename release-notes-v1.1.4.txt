@@ -1,0 +1,30 @@
+Version 1.1.4 - Chat Sending & Stability Update
+
+MAJOR IMPROVEMENTS:
+- Refactored chat sending into a strategy chain for easier maintenance when Twitch updates
+  1. react-onSendMessage — direct send (fastest, primary path)
+  2. react-slate-input — React/Slate input + send button fallback
+  3. dom-input-events — plain DOM fallback for legacy textarea inputs
+- Page bridge security: chat messages require a per-page token (reduces spoofed postMessage sends)
+- Game commands profile now refreshes default sections on extension update (custom profiles preserved)
+
+CHAT SENDING FIXES:
+- Fixed WYSIWYG editor crashes caused by clearing the chat input before send
+- Fixed double-send on first click when using slate/DOM fallback paths
+- Fixed dom fallback leaving text in the input without sending (React state sync)
+- Separated DOM and React resync logic so fallback paths do not fight each other
+
+BUG FIXES:
+- Fixed overlay storage listener leak when the panel was recreated after Twitch SPA navigation
+- Fixed duplicate section titles being hidden in the overlay (now shown as "Section (2)", etc.)
+- Popup shows an error when Panel is clicked while not on a Twitch tab (no silent close)
+
+UI IMPROVEMENTS:
+- Panel button tooltip shows keyboard shortcut
+- Popup hint documents shortcut: Ctrl+Shift+Y
+
+DEPLOYMENT INFORMATION:
+- Package: twitch-quick-commands-v1.1.4.zip
+- Version: 1.1.4
+- Contents: manifest.json, background.js, content-script.js, page-bridge.js, popup.*, options.*, icons
+- Size: 22,889 bytes
