@@ -154,7 +154,8 @@
 	let overlayController = null;
 
 	chrome.storage.onChanged.addListener(async (changes, area) => {
-		if (area !== 'sync' || !(changes.tqcProfiles || changes.tqcActiveProfileId)) {
+		const keys = window.TqcStorage.KEYS;
+		if (area !== 'sync' || !(changes[keys.profiles] || changes[keys.activeProfileId])) {
 			return;
 		}
 		if (!overlayController || !document.body.contains(overlayRoot)) {
@@ -168,7 +169,10 @@
 	});
 
 	async function loadActiveProfile() {
-		const { tqcProfiles, tqcActiveProfileId } = await safeSyncGet(['tqcProfiles', 'tqcActiveProfileId']);
+		const keys = window.TqcStorage.KEYS;
+		const stored = await safeSyncGet([keys.profiles, keys.activeProfileId]);
+		const tqcProfiles = stored[keys.profiles];
+		const tqcActiveProfileId = stored[keys.activeProfileId];
 		
 		if (tqcProfiles && tqcActiveProfileId && tqcProfiles[tqcActiveProfileId]) {
 			const prof = tqcProfiles[tqcActiveProfileId];
@@ -183,14 +187,16 @@
 	}
 
 	async function loadOverlayPosition() {
-		// Prefer local storage for position data
-		const local = await safeLocalGet('tqcOverlayPos');
-		if (local && local.tqcOverlayPos) return local.tqcOverlayPos;
-		const sync = await safeSyncGet('tqcOverlayPos');
-		return sync.tqcOverlayPos || { top: 80, left: 20 };
+		const keys = window.TqcStorage.KEYS;
+		const local = await safeLocalGet(keys.overlayPos);
+		if (local && local[keys.overlayPos]) return local[keys.overlayPos];
+		return { top: 80, left: 20 };
 	}
 
-	async function saveOverlayPosition(pos) { await safeLocalSet({ tqcOverlayPos: pos }); }
+	async function saveOverlayPosition(pos) {
+		const keys = window.TqcStorage.KEYS;
+		await safeLocalSet({ [keys.overlayPos]: pos });
+	}
 
 	function ensureStyles(root) {
 		// Remove existing styles
@@ -220,6 +226,7 @@
 			.tqc-add-btn.save{background:linear-gradient(135deg,#16a34a 0%,#15803d 100%);border-color:#15803d;color:#fff;box-shadow:0 2px 6px rgba(22,163,74,0.3)}
 			.tqc-add-btn:hover{transform:translateY(-1px);box-shadow:0 4px 8px rgba(0,0,0,0.3)}
 			.tqc-add-btn.save:hover{box-shadow:0 4px 12px rgba(22,163,74,0.4)}
+			.tqc-form-error{grid-column:1/-1;color:#fca5a5;font-size:11px;margin:4px 0 0 0}
 			
 			/* Custom scrollbar for overlay */
 			.tqc-overlay::-webkit-scrollbar{width:6px;}
@@ -319,9 +326,10 @@
 		let isUpdatingProfile = false; // Flag to prevent double-rendering during profile changes
 
 		async function hydrateProfileSelect() {
-					const { tqcProfiles, tqcActiveProfileId } = await safeSyncGet(['tqcProfiles','tqcActiveProfileId']);
-		const profiles = tqcProfiles || {};
-		const activeId = tqcActiveProfileId || 'default';
+			const keys = window.TqcStorage.KEYS;
+			const stored = await safeSyncGet([keys.profiles, keys.activeProfileId]);
+			const profiles = stored[keys.profiles] || {};
+			const activeId = stored[keys.activeProfileId] || 'default';
 			profileSelect.innerHTML = '';
 			Object.entries(profiles).forEach(([id, prof]) => {
 				const opt = document.createElement('option');
@@ -330,7 +338,7 @@
 			});
 			profileSelect.onchange = async () => {
 				isUpdatingProfile = true;
-				await safeSyncSet({ tqcActiveProfileId: profileSelect.value });
+				await safeSyncSet({ [keys.activeProfileId]: profileSelect.value });
 		
 				body.textContent = '';
 				await render();
@@ -452,6 +460,23 @@
 		};
 
 		// Add form functions
+		function showFormError(form, message) {
+			let errorEl = form.querySelector('.tqc-form-error');
+			if (!errorEl) {
+				errorEl = document.createElement('div');
+				errorEl.className = 'tqc-form-error';
+				form.insertBefore(errorEl, form.querySelector('.tqc-add-buttons'));
+			}
+			errorEl.textContent = message;
+		}
+
+		function clearFormError(form) {
+			const errorEl = form.querySelector('.tqc-form-error');
+			if (errorEl) {
+				errorEl.remove();
+			}
+		}
+
 		function showAddSectionForm() {
 			// Remove any existing forms
 			body.querySelectorAll('.tqc-add-form').forEach(f => f.remove());
@@ -486,33 +511,23 @@
 			
 			saveBtn.addEventListener('click', async () => {
 				try {
-					const title = titleInput.value.trim();
-					if (!title || title.length === 0) {
-						titleInput.focus();
-						return;
-					}
-					if (title.length > 100) {
-						alert('Section title too long (max 100 characters)');
-						return;
-					}
-					
+					clearFormError(form);
 					const active = await loadActiveProfile();
 					const sections = Array.isArray(active?.sections) ? active.sections : [];
-					
-					// Check for duplicate section names
-					if (sections.some(s => s.title?.toLowerCase() === title.toLowerCase())) {
-						alert('Section name already exists');
+					const validation = window.TqcStorage.validateSectionTitle(titleInput.value, sections);
+					if (!validation.ok) {
+						showFormError(form, validation.error);
 						titleInput.focus();
 						return;
 					}
 					
-					sections.push({ title, items: [] });
+					sections.push({ title: validation.value, items: [] });
 					
 					await saveProfileSections(sections);
 					form.remove();
 					await render();
 				} catch (error) {
-					// ignore
+					showFormError(form, 'Failed to add section');
 				}
 			});
 			
@@ -574,44 +589,34 @@
 			
 			saveBtn.addEventListener('click', async () => {
 				try {
-					const label = labelInput.value.trim();
-					const text = textInput.value.trim();
-					
-					if (!label || label.length === 0) {
-						labelInput.focus();
-						return;
-					}
-					if (!text || text.length === 0) {
-						textInput.focus();
-						return;
-					}
-					if (label.length > 50) {
-						alert('Command label too long (max 50 characters)');
-						return;
-					}
-					if (text.length > 500) {
-						alert('Command text too long (max 500 characters)');
-						return;
-					}
-					
+					clearFormError(form);
 					const active = await loadActiveProfile();
 					const sections = Array.isArray(active?.sections) ? active.sections : [];
-					if (sections[sectionIndex]) {
-						// Check for duplicate labels in the same section
-						if (sections[sectionIndex].items?.some(item => item.label?.toLowerCase() === label.toLowerCase())) {
-							alert('Command label already exists in this section');
+					const sectionItems = sections[sectionIndex]?.items || [];
+					const validation = window.TqcStorage.validateCommand(
+						labelInput.value,
+						textInput.value,
+						sectionItems
+					);
+					if (!validation.ok) {
+						showFormError(form, validation.error);
+						if (validation.error.includes('label')) {
 							labelInput.focus();
-							return;
+						} else {
+							textInput.focus();
 						}
-						
-						sections[sectionIndex].items.push({ label, text });
+						return;
+					}
+
+					if (sections[sectionIndex]) {
+						sections[sectionIndex].items.push(validation.value);
 						await saveProfileSections(sections);
 					}
 					
 					form.remove();
 					await render();
 				} catch (error) {
-					// ignore
+					showFormError(form, 'Failed to add command');
 				}
 			});
 			
@@ -626,16 +631,17 @@
 		}
 		
 		async function saveProfileSections(sections) {
-			const { tqcProfiles, tqcActiveProfileId } = await safeSyncGet(['tqcProfiles', 'tqcActiveProfileId']);
-			const profiles = tqcProfiles || {};
-			const activeId = tqcActiveProfileId || 'default';
+			const keys = window.TqcStorage.KEYS;
+			const stored = await safeSyncGet([keys.profiles, keys.activeProfileId]);
+			const profiles = stored[keys.profiles] || {};
+			const activeId = stored[keys.activeProfileId] || 'default';
 			
 			profiles[activeId] = {
 				...(profiles[activeId] || {}),
 				sections: sections
 			};
 			
-			await safeSyncSet({ tqcProfiles: profiles });
+			await safeSyncSet({ [keys.profiles]: profiles });
 		}
 
 		return container;

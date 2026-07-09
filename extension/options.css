@@ -33,7 +33,6 @@ body {
 	transition: all 0.2s ease; /* Smooth transitions when not dragging */
 }
 
-/* Section header stability */
 .section-header {
 	background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
 	border-radius: 6px;
@@ -88,8 +87,8 @@ body {
 
 /* Invalid drop zone styling */
 .invalid-drop-zone {
-	background-color: #fef2f2 !important;
-	border: 1px dashed #ef4444 !important;
+	background-color: rgba(127, 29, 29, 0.35) !important;
+	border: 1px dashed #f87171 !important;
 	border-radius: 4px;
 }
 #app {
@@ -120,6 +119,20 @@ h1 {
 	background: #1f2937;
 	color: #d1d5db;
 }
+.profile-bar input[type="text"] {
+	flex: 1;
+	min-width: 140px;
+	padding: 8px 12px;
+	border: 1px solid #374151;
+	border-radius: 6px;
+	background: #1f2937;
+	color: #d1d5db;
+}
+.profile-bar input[type="text"]:focus {
+	outline: none;
+	border-color: #16a34a;
+	box-shadow: 0 0 0 2px rgba(22, 163, 74, 0.1);
+}
 .profile-bar button { 
 	border: 1px solid #374151; 
 	border-radius: 6px; 
@@ -132,23 +145,17 @@ h1 {
 .profile-bar button:hover {
 	background: #4b5563;
 }
-.section-titles { display:none; }
-h1 {
-	font-size: 20px;
-	margin: 0 0 8px 0;
-}
 .sub {
 	margin: 0 0 16px 0;
 	color: #9ca3af;
 }
-#commands {
-	display: grid;
-	gap: 10px;
-}
 
 /* Sections container stability */
 #sectionsContainer {
-	position: relative; /* Create stacking context */
+	position: relative;
+	margin-top: 16px;
+	border-top: 1px solid #374151;
+	padding-top: 12px;
 }
 
 #sectionsList {
@@ -201,25 +208,17 @@ h1 {
 .row button.icon:hover {
 	background: #4b5563;
 }
+.row.section-header {
+	grid-template-columns: 1fr auto auto;
+}
+.row.section-header input {
+	min-width: 0;
+	width: 100%;
+}
 .actions {
 	margin-top: 14px;
 	display: flex;
 	gap: 10px;
-}
-button#add, button#save {
-	border: 1px solid #374151;
-	border-radius: 8px;
-	background: #16a34a;
-	color: #fff;
-	padding: 10px 16px;
-	cursor: pointer;
-	font-weight: 500;
-	transition: all 0.2s ease;
-}
-button#add:hover, button#save:hover {
-	background: #15803d;
-	transform: translateY(-1px);
-	box-shadow: 0 4px 8px rgba(22, 163, 74, 0.3);
 }
 .saved {
 	color: #059669;

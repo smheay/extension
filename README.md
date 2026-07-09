@@ -14,7 +14,7 @@ A Chrome extension that helps streamers and viewers quickly send predefined comm
 - **Quick Command Panel**: Toggle overlay with Ctrl+Shift+Y or popup
 - **Customizable Profiles**: Create different command sets (Game Commands, Emotes, Custom)
 - **Organized Sections**: Group related commands together
-- **Drag & Drop Reordering**: Easily rearrange commands within sections
+- **Drag & Drop Reordering**: Rearrange commands within a section (not between sections)
 - **Auto-Save**: Changes are saved automatically as you type
 - **Visual Feedback**: Smooth animations and clear drop indicators
 - **Multiple Profiles**: Switch between different command sets instantly
@@ -47,11 +47,12 @@ A Chrome extension that helps streamers and viewers quickly send predefined comm
 4. **Customize**: 
    - **Label**: What appears on the button
    - **Text**: What gets sent to chat
-5. **Reorder**: Drag commands to rearrange them
+5. **Reorder**: Drag commands within a section to rearrange them
 6. **Auto-Save**: Everything saves automatically
 
 ### Multiple Profiles
 - **Switch Profiles**: Use the dropdown in options to switch between profiles
+- **Rename Profiles**: Edit the profile name field next to the dropdown
 - **Create New**: Click "Add Profile" to create a new command set
 - **Reset Defaults**: Use "Reset to Defaults" to restore default commands
 
@@ -74,7 +75,6 @@ A Chrome extension that helps streamers and viewers quickly send predefined comm
 
 - **Manifest Version**: 3 (Latest Chrome extension standard)
 - **Permissions**: 
-  - `activeTab`: Access current Twitch tab
   - `tabs`: Find Twitch tabs
   - `scripting`: Inject command functionality
   - `storage`: Save your custom commands
@@ -82,7 +82,7 @@ A Chrome extension that helps streamers and viewers quickly send predefined comm
 
 ## 🛡️ Privacy & Security
 
-- **No Data Collection**: Your commands are stored locally only
+- **No Data Collection**: Your commands are stored in Chrome storage on your device (profiles sync across signed-in Chrome devices via `chrome.storage.sync`; overlay position stays local)
 - **Twitch Only**: Extension only activates on Twitch.tv
 - **No Network Requests**: No data is sent to external servers
 - **Open Source**: Code is transparent and auditable

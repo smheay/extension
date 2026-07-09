@@ -12,18 +12,20 @@
 		<div class="profile-bar">
 			<label>Profile:</label>
 			<select id="profileSelect"></select>
+			<input id="profileName" type="text" placeholder="Profile name" title="Rename current profile" />
 			<button id="addProfile">New Profile</button>
 			<button id="deleteProfile" title="Delete current profile">Delete</button>
 			<button id="resetDefaults" title="Reset current profile to default sections">Reset to Defaults</button>
 		</div>
 		<p class="sub">Add, remove, and reorder commands. Label is what you see; Text is what gets sent.</p>
 
-		<div id="commands"></div>
+		<div id="sectionsContainer"></div>
 		<div class="actions">
 			<button id="addSection">Add Section</button>
 		</div>
 		<p id="saved" class="saved" hidden>Saved!</p>
 	</div>
+	<script src="tqc-storage.js"></script>
 	<script src="options.js"></script>
 </body>
 </html>

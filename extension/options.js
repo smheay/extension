@@ -1,34 +1,4 @@
-async function loadProfiles() {
-	const { tqcProfiles, tqcActiveProfileId } = await chrome.storage.sync.get(["tqcProfiles", "tqcActiveProfileId"]);
-	let profiles = tqcProfiles || {};
-	let activeId = tqcActiveProfileId;
-
-	if (Object.keys(profiles).length === 0) {
-		await new Promise((resolve) => {
-			chrome.runtime.sendMessage({ type: 'SEED_DEFAULT_PROFILES' }, () => resolve());
-		});
-		const seeded = await chrome.storage.sync.get(["tqcProfiles", "tqcActiveProfileId"]);
-		return {
-			profiles: seeded.tqcProfiles || {},
-			activeId: seeded.tqcActiveProfileId || 'default'
-		};
-	}
-
-	if (!activeId) {
-		activeId = Object.keys(profiles)[0];
-		await chrome.storage.sync.set({ tqcProfiles: profiles, tqcActiveProfileId: activeId });
-	}
-	return { profiles, activeId };
-}
-
-async function saveProfiles(profiles, activeId) {
-	await chrome.storage.sync.set({ tqcProfiles: profiles, tqcActiveProfileId: activeId });
-}
-
-// Helper function for consistent default profile structure
-function createDefaultProfile(name = "Default") {
-	return { name, sections: [] };
-}
+const { loadProfiles, saveProfiles, createDefaultProfile } = window.TqcStorage;
 
 async function refreshSectionsOnly() {
 	const sectionsContainer = document.getElementById('sectionsContainer');
@@ -48,14 +18,13 @@ async function renderSectionsEditor(list) {
 	sections.forEach((sec, idx) => {
 		const headerRow = document.createElement('div');
 		headerRow.className = 'row section-header';
-		const drag = document.createElement('span'); drag.textContent = '≡';
 		const title = document.createElement('input'); title.placeholder = 'Section title'; title.value = sec.title || '';
 		title.addEventListener('input', autoSave);
 		const addItemBtn = document.createElement('button'); addItemBtn.className = 'icon'; addItemBtn.textContent = '+'; addItemBtn.title = 'Add command to section';
 		const del = document.createElement('button'); del.className = 'icon'; del.textContent = '✕';
-		headerRow.appendChild(drag); headerRow.appendChild(title);
-		const spacer = document.createElement('div'); spacer.style.minHeight = '1px'; headerRow.appendChild(spacer);
-		headerRow.appendChild(addItemBtn); headerRow.appendChild(del);
+		headerRow.appendChild(title);
+		headerRow.appendChild(addItemBtn);
+		headerRow.appendChild(del);
 		list.appendChild(headerRow);
 
 		sec.items = Array.isArray(sec.items) ? sec.items : [];
@@ -325,10 +294,10 @@ document.getElementById("resetDefaults").addEventListener("click", async () => {
 					: resetKind === 'emotes'
 						? 'default emotes'
 						: 'empty state';
-				alert(`${profileName} reset to ${resetLabel}!`);
+				showNotification(`${profileName} reset to ${resetLabel}!`, 2000);
 				await hydrateProfilesUI();
 			} else {
-				alert('Failed to reset profile');
+				showNotification('Failed to reset profile', 2000);
 			}
 		}
 	);
@@ -399,6 +368,7 @@ function ensureGlobalDragHandlers() {
 async function hydrateProfilesUI() {
 	const { profiles, activeId } = await loadProfiles();
 	const select = document.getElementById('profileSelect');
+	const profileNameInput = document.getElementById('profileName');
 	select.innerHTML = '';
 	Object.entries(profiles).forEach(([id, prof]) => {
 		const opt = document.createElement('option');
@@ -406,6 +376,9 @@ async function hydrateProfilesUI() {
 		if (id === activeId) opt.selected = true;
 		select.appendChild(opt);
 	});
+	if (profileNameInput) {
+		profileNameInput.value = profiles[activeId]?.name || '';
+	}
 	select.onchange = async () => {
 		const nextId = select.value;
 		const latest = await loadProfiles();
@@ -413,23 +386,11 @@ async function hydrateProfilesUI() {
 		await hydrateProfilesUI();
 	};
 
-	const commandsContainer = document.getElementById("commands");
-	if (commandsContainer) {
-		commandsContainer.innerHTML = '';
-	}
+	const sectionsContainer = document.getElementById('sectionsContainer');
+	if (!sectionsContainer) return;
 
-	// Clear and rebuild sections editor
-	let sectionsContainer = document.getElementById('sectionsContainer');
-	if (sectionsContainer) {
-		sectionsContainer.remove();
-	}
-	
-	sectionsContainer = document.createElement('div');
-	sectionsContainer.id = 'sectionsContainer';
-	sectionsContainer.style.marginTop = '16px';
-	sectionsContainer.style.borderTop = '1px solid #e5e7eb';
-	sectionsContainer.style.paddingTop = '12px';
-	
+	sectionsContainer.innerHTML = '';
+
 	const header = document.createElement('h2');
 	header.textContent = 'Sections (this profile)';
 	header.style.fontSize = '14px';
@@ -441,14 +402,49 @@ async function hydrateProfilesUI() {
 	list.style.display = 'grid';
 	list.style.gap = '8px';
 	sectionsContainer.appendChild(list);
-	
-	document.getElementById('commands').parentNode.appendChild(sectionsContainer);
 
 	await renderSectionsEditor(list);
 }
 
+let profileNameSaveTimeout = null;
+
+function setupProfileRename() {
+	const profileNameInput = document.getElementById('profileName');
+	if (!profileNameInput) return;
+
+	profileNameInput.addEventListener('input', () => {
+		if (profileNameSaveTimeout) {
+			clearTimeout(profileNameSaveTimeout);
+		}
+
+		profileNameSaveTimeout = setTimeout(async () => {
+			const { profiles, activeId } = await loadProfiles();
+			const nextName = profileNameInput.value.trim();
+			if (!nextName) {
+				profileNameInput.value = profiles[activeId]?.name || '';
+				showNotification('Profile name cannot be empty', 2000);
+				return;
+			}
+
+			profiles[activeId] = {
+				...(profiles[activeId] || createDefaultProfile()),
+				name: nextName
+			};
+			await saveProfiles(profiles, activeId);
+
+			const select = document.getElementById('profileSelect');
+			const selectedOption = select?.querySelector(`option[value="${activeId}"]`);
+			if (selectedOption) {
+				selectedOption.textContent = nextName;
+			}
+			showNotification('Profile renamed', 1000);
+		}, AUTO_SAVE_DELAY_MS);
+	});
+}
+
 (async () => {
 	ensureGlobalDragHandlers();
+	setupProfileRename();
 	await hydrateProfilesUI();
 })();
 

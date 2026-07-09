@@ -40,6 +40,13 @@ const DEFAULT_GAME_SECTIONS = [
 			{ label: 'Evolve Succubus (25)', text: '!evolvesuccubus' },
 			{ label: 'Evolve Woodland Joe (10)', text: '!evolvewoodlandjoe' }
 		]
+	},	{
+		title: 'Boss Vote',
+		items: [
+			{ label: 'Vote 1', text: '!vote1' },
+			{ label: 'Vote 2', text: '!vote2' },
+			{ label: 'Vote 3', text: '!vote3' }
+		]
 	}
 ];
 
@@ -121,6 +128,10 @@ async function ensureContentScriptAndSendMessage(tabId, message) {
 		try {
 			await chrome.scripting.executeScript({
 				target: { tabId: tabId, frameIds: [0] },
+				files: ["tqc-storage.js"]
+			});
+			await chrome.scripting.executeScript({
+				target: { tabId: tabId, frameIds: [0] },
 				files: ["page-bridge.js"],
 				world: "MAIN"
 			});
@@ -199,55 +210,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 		return true;
 	}
 
-	// Backward compatibility for older options pages
-	if (message && message.type === 'RECREATE_GAME_PROFILE') {
-		(async () => {
-			try {
-				const { tqcProfiles, tqcActiveProfileId } = await chrome.storage.sync.get(['tqcProfiles', 'tqcActiveProfileId']);
-				const profiles = tqcProfiles || {};
-				const profileId = message.profileId || tqcActiveProfileId || 'default';
-				profiles[profileId] = resetProfileToGameDefaults(profiles[profileId]);
-				await chrome.storage.sync.set({ tqcProfiles: profiles, tqcActiveProfileId: profileId });
-				sendResponse({ ok: true });
-			} catch (error) {
-				sendResponse({ ok: false, error: error.message });
-			}
-		})();
-		return true;
-	}
-
-	if (message && message.type === 'RECREATE_EMOTES_PROFILE') {
-		(async () => {
-			try {
-				const { tqcProfiles, tqcActiveProfileId } = await chrome.storage.sync.get(['tqcProfiles', 'tqcActiveProfileId']);
-				const profiles = tqcProfiles || {};
-				const profileId = message.profileId || tqcActiveProfileId || 'emotes';
-				profiles[profileId] = resetProfileToEmoteDefaults(profiles[profileId]);
-				await chrome.storage.sync.set({ tqcProfiles: profiles, tqcActiveProfileId: profileId });
-				sendResponse({ ok: true });
-			} catch (error) {
-				sendResponse({ ok: false, error: error.message });
-			}
-		})();
-		return true;
-	}
-	
-	// Handle toggle overlay from popup
 	if (message && message.type === 'TQC_TOGGLE_OVERLAY_FROM_POPUP') {
 		(async () => {
 			try {
-				const tabResult = await getActiveTwitchTab();
-				if (tabResult.error) {
-					sendResponse({ ok: false, error: tabResult.error });
-					return;
-				}
-
-				const result = await ensureContentScriptAndSendMessage(
-					tabResult.tab.id, 
-					{ type: 'TQC_TOGGLE_OVERLAY' }
-				);
-				
-				sendResponse({ ok: result.ok, error: result.error });
+				const result = await toggleOverlayOnActiveTwitchTab();
+				sendResponse(result);
 			} catch (error) {
 				sendResponse({ ok: false, error: error.message });
 			}
@@ -258,21 +225,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 	return false;
 });
 
-// Keyboard shortcut to toggle overlay
+async function toggleOverlayOnActiveTwitchTab() {
+	const tabResult = await getActiveTwitchTab();
+	if (tabResult.error) {
+		return { ok: false, error: tabResult.error };
+	}
+
+	return ensureContentScriptAndSendMessage(
+		tabResult.tab.id,
+		{ type: 'TQC_TOGGLE_OVERLAY' }
+	);
+}
+
 chrome.commands?.onCommand.addListener(async (command) => {
 	if (command !== 'toggle-overlay') return;
-	
-	try {
-		const tabResult = await getActiveTwitchTab();
-		if (tabResult.error) return; // Silently fail for keyboard shortcuts
-		
-		await ensureContentScriptAndSendMessage(
-			tabResult.tab.id, 
-			{ type: 'TQC_TOGGLE_OVERLAY' }
-		);
-	} catch (error) {
-		// Silently fail for keyboard shortcuts - no user feedback needed
-	}
+	await toggleOverlayOnActiveTwitchTab();
 });
 
 

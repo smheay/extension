@@ -20,31 +20,31 @@ Specifically, we do not collect:
 - Location data
 - Any other personal data
 
-## Information Stored Locally
+## Information Stored in Chrome
 
-The Extension stores the following information **locally on your device only**:
+The Extension stores the following information in Chrome's built-in storage APIs:
 
-### Command Data
+### Command Data (`chrome.storage.sync`)
 - Custom command labels and text you create
 - Profile names and organization
 - Section organization and ordering
-- Extension settings and preferences
 
-### Important Notes About Local Storage:
-- This data never leaves your device
+Profiles and commands may sync across devices when you are signed into Chrome with sync enabled.
+
+### Overlay Position (`chrome.storage.local`)
+- Floating panel position on Twitch pages
+- Stored on the current device only
+
+### Important Notes About Storage:
+- This data never leaves your device through our servers
 - We cannot access this data
 - Data is not transmitted to our servers or any third parties
-- Data persists only in your local Chrome browser storage
+- Chrome may sync profile data across your signed-in devices using Google's sync infrastructure
 - You can delete this data anytime by removing the extension
 
 ## Permissions Explanation
 
 The Extension requests these permissions for functionality:
-
-### `activeTab`
-- **Purpose**: Access the current Twitch tab to send chat messages
-- **Scope**: Only the currently active tab, only when extension is used
-- **Data Access**: No data is read or stored from pages
 
 ### `tabs`  
 - **Purpose**: Find open Twitch tabs to inject functionality
@@ -57,8 +57,8 @@ The Extension requests these permissions for functionality:
 - **Data Access**: Only to insert command buttons, no content reading
 
 ### `storage`
-- **Purpose**: Save your custom commands locally
-- **Scope**: Chrome's local storage API only
+- **Purpose**: Save your custom commands and overlay position
+- **Scope**: Chrome's `storage.sync` (profiles/commands) and `storage.local` (overlay position)
 - **Data Access**: Only Extension-created data
 
 ### Host Permission: `https://*.twitch.tv/*`
@@ -132,7 +132,7 @@ This Extension complies with:
 
 **In Plain English:**
 - We don't collect any information about you
-- Your custom commands stay on your computer only
+- Your custom commands stay in Chrome storage on your device (profiles may sync across signed-in Chrome devices)
 - We can't see or access your data
 - No tracking, analytics, or data sharing
 - You have complete control over your information
