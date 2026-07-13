@@ -1,0 +1,8 @@
+v1.1.7
+
+- Privacy policy and README disclose Twitch GQL usage for optional prediction commands
+- Default prediction stake 250,000 points (click places the bet immediately)
+- SEED_DEFAULT_PROFILES only runs when storage is empty; RESET/toggle require extension-page sender
+- Page bridge postMessage uses window.location.origin (not *)
+- Options: section delete confirm, shared validation limits, clearer save failures
+- Overlay: persist resized height, restore button tooltips after errors, toast on sync save failure

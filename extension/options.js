@@ -1,4 +1,10 @@
-const { loadProfiles, saveProfiles, createDefaultProfile } = window.TqcStorage;
+const {
+	loadProfiles,
+	saveProfiles,
+	createDefaultProfile,
+	validateSectionTitle,
+	LIMITS
+} = window.TqcStorage;
 
 async function refreshSectionsOnly() {
 	const sectionsContainer = document.getElementById('sectionsContainer');
@@ -166,15 +172,27 @@ async function renderSectionsEditor(list) {
 		renderItems();
 
 				addItemBtn.addEventListener('click', () => { 
-			sec.items.push({ label: 'New', text: '' }); 
+			sec.items.push({ label: '', text: '' }); 
 			renderItems();
-			autoSave();
+			const rows = list.querySelectorAll(`.item-row[data-sec="${idx}"]`);
+			const lastRow = rows[rows.length - 1];
+			const focusInput = lastRow?.querySelector('input');
+			if (focusInput) focusInput.focus();
 		});
-		del.addEventListener('click', async () => { 
-			const { profiles, activeId } = await loadProfiles();
-			profiles[activeId].sections.splice(idx, 1); 
-			await saveProfiles(profiles, activeId);
-			await refreshSectionsOnly();
+		del.addEventListener('click', async () => {
+			const sectionTitle = (sec.title || 'Section').trim() || 'Section';
+			if (!confirm(`Delete section "${sectionTitle}" and all of its commands?`)) {
+				return;
+			}
+			try {
+				const { profiles, activeId } = await loadProfiles();
+				profiles[activeId].sections.splice(idx, 1); 
+				await saveProfiles(profiles, activeId);
+				await refreshSectionsOnly();
+				showNotification('Section deleted', 1200);
+			} catch (error) {
+				showNotification(error.message || 'Failed to delete section', 2000);
+			}
 		});
 		title.addEventListener('input', e => { sec.title = e.target.value; autoSave(); });
 	});
@@ -190,14 +208,58 @@ function captureCurrentSections() {
 		const titleInput = headerEl.querySelector('input');
 		const title = (titleInput?.value || '').trim() || 'Section';
 		
-		// Use more efficient selector - avoid document-wide search
 		const items = Array.from(sectionsList.querySelectorAll(`.item-row[data-sec="${idx}"]`)).map(row => {
 			const inputs = row.querySelectorAll('input');
 			return { label: inputs[0]?.value || '', text: inputs[1]?.value || '' };
-		}).filter(i => (i.text || '').trim().length > 0);
+		}).filter((item) => (item.label || '').trim().length > 0 || (item.text || '').trim().length > 0);
 		
 		return { title, items };
 	});
+}
+
+function validateSectionsForSave(sections) {
+	const seenTitles = new Set();
+	const persistable = [];
+
+	for (const section of sections) {
+		const title = (section.title || '').trim();
+		if (!title) {
+			return { ok: false, error: 'Section title is required' };
+		}
+		if (title.length > LIMITS.sectionTitle) {
+			return { ok: false, error: `Section title too long (max ${LIMITS.sectionTitle} characters)` };
+		}
+		const titleKey = title.toLowerCase();
+		if (seenTitles.has(titleKey)) {
+			return { ok: false, error: `Duplicate section title: ${title}` };
+		}
+		seenTitles.add(titleKey);
+
+		const items = [];
+		const seenLabels = new Set();
+		for (const item of section.items || []) {
+			const label = (item.label || '').trim();
+			const text = (item.text || '').trim();
+			// Keep incomplete drafts in the editor UI; only persist finished commands.
+			if (!label || !text) continue;
+			if (label.length > LIMITS.commandLabel) {
+				return { ok: false, error: `Command label too long (max ${LIMITS.commandLabel} characters)` };
+			}
+			if (text.length > LIMITS.commandText) {
+				return { ok: false, error: `Command text too long (max ${LIMITS.commandText} characters)` };
+			}
+			const labelKey = label.toLowerCase();
+			if (seenLabels.has(labelKey)) {
+				return { ok: false, error: `Duplicate command label in "${title}": ${label}` };
+			}
+			seenLabels.add(labelKey);
+			items.push({ label, text });
+		}
+
+		persistable.push({ title, items });
+	}
+
+	return { ok: true, sections: persistable };
 }
 
 
@@ -249,9 +311,15 @@ async function persistSectionsToProfile(profileId) {
 	const builtSections = captureCurrentSections();
 	if (!Array.isArray(builtSections)) return false;
 
+	const validation = validateSectionsForSave(builtSections);
+	if (!validation.ok) {
+		showNotification(validation.error, 2000);
+		return false;
+	}
+
 	profiles[profileId] = {
 		...profiles[profileId],
-		sections: builtSections
+		sections: validation.sections
 	};
 	await saveProfiles(profiles, activeId || profileId);
 	return true;
@@ -293,19 +361,25 @@ async function autoSave() {
 
 document.getElementById("addSection").addEventListener("click", async () => {
 	cancelPendingSaves();
-	const { profiles, activeId } = await loadProfiles();
-	const currentSections = captureCurrentSections();
-	currentSections.push({ title: 'New Section', items: [] });
-	
-	const currentProfile = profiles[activeId] || createDefaultProfile();
-	profiles[activeId] = { 
-		...currentProfile, 
-		sections: currentSections
-	};
-	
-	await saveProfiles(profiles, activeId);
-	await refreshSectionsOnly();
-	showNotification("Section added & saved", 1200);
+	try {
+		const { profiles, activeId } = await loadProfiles();
+		const currentSections = captureCurrentSections();
+		const validation = validateSectionTitle('New Section', currentSections);
+		const nextTitle = validation.ok ? validation.value : `New Section ${currentSections.length + 1}`;
+		currentSections.push({ title: nextTitle, items: [] });
+		
+		const currentProfile = profiles[activeId] || createDefaultProfile();
+		profiles[activeId] = { 
+			...currentProfile, 
+			sections: currentSections
+		};
+		
+		await saveProfiles(profiles, activeId);
+		await refreshSectionsOnly();
+		showNotification("Section added & saved", 1200);
+	} catch (error) {
+		showNotification(error.message || 'Failed to add section', 2000);
+	}
 });
 
 document.getElementById("resetDefaults").addEventListener("click", async () => {

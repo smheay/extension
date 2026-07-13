@@ -80,6 +80,7 @@
 			function handler(event) {
 				if (
 					event.source !== window ||
+					event.origin !== window.location.origin ||
 					event.data?.type !== resultType ||
 					event.data?.requestId !== requestId ||
 					event.data?.token !== bridgeToken
@@ -95,7 +96,7 @@
 			}
 
 			window.addEventListener('message', handler);
-			window.postMessage({ type: requestType, requestId, token: bridgeToken, ...payload }, '*');
+			window.postMessage({ type: requestType, requestId, token: bridgeToken, ...payload }, window.location.origin);
 		});
 	}
 
@@ -118,9 +119,12 @@
 
 	async function safeSyncSet(obj) {
 		try {
-			if (!isExtensionAlive()) return;
+			if (!isExtensionAlive()) return { ok: false, error: 'Extension context invalidated' };
 			await chrome.storage.sync.set(obj);
-		} catch (e) {}
+			return { ok: true };
+		} catch (e) {
+			return { ok: false, error: e.message || 'Failed to save' };
+		}
 	}
 
 	async function safeLocalGet(keys) {
@@ -205,7 +209,7 @@
 		return { id: 'default', name: 'Default', sections: [] };
 	}
 
-	const OVERLAY_DEFAULTS = { top: 80, left: 20, width: 320 };
+	const OVERLAY_DEFAULTS = { top: 80, left: 20, width: 320, height: null };
 	const OVERLAY_MIN_WIDTH = 240;
 	const OVERLAY_MIN_HEIGHT = 180;
 	const OVERLAY_HEADER_HEIGHT = 44;
@@ -217,7 +221,8 @@
 		return {
 			top: Number.isFinite(saved.top) ? saved.top : OVERLAY_DEFAULTS.top,
 			left: Number.isFinite(saved.left) ? saved.left : OVERLAY_DEFAULTS.left,
-			width: Number.isFinite(saved.width) ? saved.width : OVERLAY_DEFAULTS.width
+			width: Number.isFinite(saved.width) ? saved.width : OVERLAY_DEFAULTS.width,
+			height: Number.isFinite(saved.height) ? saved.height : OVERLAY_DEFAULTS.height
 		};
 	}
 
@@ -228,7 +233,8 @@
 			[keys.overlayPos]: {
 				top: Number.isFinite(layout.top) ? layout.top : current.top,
 				left: Number.isFinite(layout.left) ? layout.left : current.left,
-				width: Number.isFinite(layout.width) ? layout.width : current.width
+				width: Number.isFinite(layout.width) ? layout.width : current.width,
+				height: Number.isFinite(layout.height) ? layout.height : current.height
 			}
 		});
 	}
@@ -271,6 +277,7 @@
 			.tqc-add-btn.danger:hover{box-shadow:0 4px 12px rgba(220,38,38,0.4)}
 			.tqc-confirm-message{grid-column:1/-1;color:#e5e7eb;font-size:12px;margin:0 0 4px 0;line-height:1.4}
 			.tqc-form-error{grid-column:1/-1;color:#fca5a5;font-size:11px;margin:4px 0 0 0}
+			.tqc-toast{position:absolute;left:10px;right:10px;bottom:18px;z-index:4;background:#7f1d1d;color:#fecaca;border:1px solid #991b1b;border-radius:6px;padding:8px 10px;font-size:11px;text-align:center;pointer-events:none}
 			.tqc-resize-handle{position:absolute;right:0;bottom:0;width:16px;height:16px;cursor:nwse-resize;z-index:3}
 			.tqc-resize-handle::before{content:'';position:absolute;right:4px;bottom:4px;width:8px;height:8px;border-right:2px solid #6b7280;border-bottom:2px solid #6b7280;border-radius:1px;opacity:.85}
 			.tqc-resize-handle:hover::before{border-color:#9ca3af}
@@ -385,6 +392,24 @@
 
 		let lastLayout = null;
 		let heightLockedByUser = false;
+		let toastTimer = null;
+
+		function showOverlayToast(message) {
+			const existing = container.querySelector('.tqc-toast');
+			if (existing) existing.remove();
+			if (toastTimer) {
+				clearTimeout(toastTimer);
+				toastTimer = null;
+			}
+			const toast = document.createElement('div');
+			toast.className = 'tqc-toast';
+			toast.textContent = message;
+			container.appendChild(toast);
+			toastTimer = setTimeout(() => {
+				toast.remove();
+				toastTimer = null;
+			}, 2500);
+		}
 
 		function fitHeightToContent() {
 			if (heightLockedByUser) return;
@@ -410,7 +435,7 @@
 				container.style.width = width + 'px';
 				container.style.height = height + 'px';
 				heightLockedByUser = true;
-				lastLayout = { width };
+				lastLayout = { width, height };
 				return;
 			}
 
@@ -436,11 +461,15 @@
 
 		close.addEventListener('click', () => { container.style.display = 'none'; });
 
-		// Position + width (height fits each profile after render)
+		// Position + size (height fits content unless user locked/saved a height)
 		const layout = await loadOverlayLayout();
 		container.style.top = layout.top + 'px';
 		container.style.left = layout.left + 'px';
 		container.style.width = layout.width + 'px';
+		if (Number.isFinite(layout.height)) {
+			container.style.height = layout.height + 'px';
+			heightLockedByUser = true;
+		}
 
 		let isUpdatingProfile = false; // Flag to prevent double-rendering during profile changes
 
@@ -458,7 +487,10 @@
 			profileSelect.onchange = async () => {
 				isUpdatingProfile = true;
 				heightLockedByUser = false;
-				await safeSyncSet({ [keys.activeProfileId]: profileSelect.value });
+				const saveResult = await safeSyncSet({ [keys.activeProfileId]: profileSelect.value });
+				if (!saveResult.ok) {
+					showOverlayToast(saveResult.error || 'Failed to save profile switch');
+				}
 		
 				body.textContent = '';
 				await render();
@@ -567,7 +599,7 @@
 								btn.title = result.error;
 								setTimeout(() => {
 									btn.style.outline = '';
-									btn.title = '';
+									btn.title = labelText;
 								}, 2000);
 							}
 						} finally {
@@ -847,7 +879,11 @@
 				sections: sections
 			};
 			
-			await safeSyncSet({ [keys.profiles]: profiles });
+			const saveResult = await safeSyncSet({ [keys.profiles]: profiles });
+			if (!saveResult.ok) {
+				showOverlayToast(saveResult.error || 'Failed to save changes');
+				throw new Error(saveResult.error || 'Failed to save changes');
+			}
 		}
 
 		return container;

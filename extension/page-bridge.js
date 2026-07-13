@@ -5,6 +5,8 @@
 	window.__tqcPageBridgeLoaded = true;
 
 	const BRIDGE_TOKEN_ATTR = 'data-tqc-bridge-token';
+	// Soft auth for isolated↔MAIN postMessage. Readable from the DOM by any page script;
+	// prefer same-origin targeting and never treat this as strong security.
 	let bridgeToken = document.documentElement.getAttribute(BRIDGE_TOKEN_ATTR);
 	if (!bridgeToken) {
 		bridgeToken = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -463,11 +465,16 @@
 			token: bridgeToken,
 			ok: !!result.ok,
 			error: result.error
-		}, '*');
+		}, window.location.origin);
 	}
 
 	window.addEventListener('message', (event) => {
-		if (event.source !== window || !event.data || event.data.token !== bridgeToken) {
+		if (
+			event.source !== window ||
+			event.origin !== window.location.origin ||
+			!event.data ||
+			event.data.token !== bridgeToken
+		) {
 			return;
 		}
 

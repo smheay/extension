@@ -184,11 +184,32 @@ chrome.runtime.onInstalled.addListener(async (details) => {
 	}
 });
 
+function isTrustedExtensionSender(sender) {
+	return !!(sender && sender.id === chrome.runtime.id);
+}
+
+function isExtensionPageSender(sender) {
+	if (!isTrustedExtensionSender(sender) || typeof sender.url !== 'string') {
+		return false;
+	}
+	return sender.url.startsWith(`chrome-extension://${chrome.runtime.id}/`);
+}
+
 // Handle all messages - consolidated single listener
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 	if (message && message.type === 'SEED_DEFAULT_PROFILES') {
+		if (!isTrustedExtensionSender(sender)) {
+			sendResponse({ ok: false, error: 'Unauthorized' });
+			return false;
+		}
 		(async () => {
 			try {
+				const { tqcProfiles } = await chrome.storage.sync.get(['tqcProfiles']);
+				const profiles = tqcProfiles || {};
+				if (Object.keys(profiles).length > 0) {
+					sendResponse({ ok: true, skipped: true });
+					return;
+				}
 				await chrome.storage.sync.set({
 					tqcProfiles: createSeedProfiles(),
 					tqcActiveProfileId: 'default'
@@ -202,6 +223,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 	}
 
 	if (message && message.type === 'RESET_PROFILE_TO_DEFAULTS') {
+		if (!isExtensionPageSender(sender)) {
+			sendResponse({ ok: false, error: 'Unauthorized' });
+			return false;
+		}
 		(async () => {
 			try {
 				const { tqcProfiles, tqcActiveProfileId } = await chrome.storage.sync.get(['tqcProfiles', 'tqcActiveProfileId']);
@@ -228,6 +253,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 	}
 
 	if (message && message.type === 'TQC_TOGGLE_OVERLAY_FROM_POPUP') {
+		if (!isExtensionPageSender(sender)) {
+			sendResponse({ ok: false, error: 'Unauthorized' });
+			return false;
+		}
 		(async () => {
 			try {
 				const result = await toggleOverlayOnActiveTwitchTab();
