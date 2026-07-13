@@ -11,6 +11,28 @@
 		commandText: 500
 	};
 
+	const PREDICTION_PREFIX = 'tqc-predict:';
+	const DEFAULT_PREDICTION_POINTS = 250000;
+
+	function buildPredictionCommand(side, points = DEFAULT_PREDICTION_POINTS) {
+		return `${PREDICTION_PREFIX}${side}:${points}`;
+	}
+
+	function parsePredictionCommand(text) {
+		if (!text || typeof text !== 'string' || !text.startsWith(PREDICTION_PREFIX)) {
+			return null;
+		}
+		const parts = text.slice(PREDICTION_PREFIX.length).split(':');
+		if (parts.length < 2) return null;
+		const side = parts[0].toLowerCase();
+		if (side !== 'yes' && side !== 'no') return null;
+		const points = Number.parseInt(parts[1], 10);
+		return {
+			side,
+			points: Number.isFinite(points) && points > 0 ? points : DEFAULT_PREDICTION_POINTS
+		};
+	}
+
 	function createDefaultProfile(name = 'Default') {
 		return { name, sections: [] };
 	}
@@ -87,6 +109,10 @@
 	window.TqcStorage = {
 		KEYS,
 		LIMITS,
+		PREDICTION_PREFIX,
+		DEFAULT_PREDICTION_POINTS,
+		buildPredictionCommand,
+		parsePredictionCommand,
 		createDefaultProfile,
 		validateSectionTitle,
 		validateCommand,

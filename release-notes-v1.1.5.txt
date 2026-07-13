@@ -1,0 +1,38 @@
+Version 1.1.5 - Predictions, Cleanup & Options Update
+
+MAJOR IMPROVEMENTS:
+- Added Twitch prediction support: place Yes/No channel point bets from the overlay (250,000 points by default)
+- Predictions use Twitch's active prediction on the current channel (requires login and an open prediction)
+- Added shared tqc-storage.js module for profile loading, validation limits, and prediction command parsing
+- Added Boss Vote default commands: !vote1, !vote2, !vote3
+- Added Prediction default commands: Predict Yes (250k) and Predict No (250k)
+- Starter profiles (Game commands, Emotes) seed on first install only — updates no longer overwrite Game commands
+- Use Reset to Defaults when you want the latest starter command set
+
+CODE CLEANUP:
+- Removed unused RECREATE_GAME_PROFILE and RECREATE_EMOTES_PROFILE background handlers
+- Removed dead options CSS/HTML placeholders (#commands, legacy button styles)
+- Removed unused activeTab permission (tabs + host_permissions cover current usage)
+- Consolidated overlay toggle logic into a single background helper
+- Removed overlay position sync-storage fallback (local-only going forward)
+
+BUG FIXES:
+- Fixed section titles cut off in options (e.g. "Core Commands" showing only the first letter)
+- Fixed invalid-drop-zone highlight for dark theme options page
+- Fixed missing comma in default game sections array (Boss Vote section)
+
+UI IMPROVEMENTS:
+- Added profile rename field in options (edit name next to profile dropdown)
+- Replaced alert() dialogs with toast notifications in options and inline errors in overlay forms
+- Overlay buttons show a brief error outline when chat send or prediction fails
+- Clarified drag-reorder scope in README (commands within a section only)
+
+DOCS & PRIVACY:
+- Updated README and privacy policy for chrome.storage.sync vs local overlay position
+- Updated permission lists after activeTab removal
+
+DEPLOYMENT INFORMATION:
+- Package: twitch-quick-commands-v1.1.5.zip
+- Version: 1.1.5
+- Contents: manifest.json, background.js, content-script.js, page-bridge.js, tqc-storage.js, popup.*, options.*, icons
+- Size: 28,076 bytes

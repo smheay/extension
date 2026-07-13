@@ -278,35 +278,226 @@
 		return { ok: false, error: 'All send strategies failed' };
 	}
 
-	window.addEventListener('message', (event) => {
-		if (event.source !== window || !event.data || event.data.type !== 'TQC_SEND_CHAT') {
-			return;
-		}
-		if (event.data.token !== bridgeToken) {
-			return;
-		}
+	const TWITCH_CLIENT_ID = 'kimne78kx3ncx6brgo4mv6wki5h1ko';
+	const GQL_URL = 'https://gql.twitch.tv/gql';
+	const PREDICTION_CONTEXT_HASH = 'beb846598256b75bd7c1fe54a80431335996153e358ca9c7837ce7bb83d7d383';
+	const MAKE_PREDICTION_HASH = 'b44682ecc88358817009f20e69d75081b1e58825bb40aa53d5dbadcc17c881d8';
 
-		const { text, requestId } = event.data;
+	function getCookieValue(name) {
+		const match = document.cookie.match(new RegExp('(?:^|;\\s*)' + name + '=([^;]+)'));
+		return match ? decodeURIComponent(match[1]) : null;
+	}
 
-		sendChatMessage(text || '')
-			.then((result) => {
-				window.postMessage({
-					type: 'TQC_CHAT_RESULT',
-					requestId,
-					token: bridgeToken,
-					ok: !!result.ok,
-					error: result.error,
-					via: result.via
-				}, '*');
-			})
-			.catch((error) => {
-				window.postMessage({
-					type: 'TQC_CHAT_RESULT',
-					requestId,
-					token: bridgeToken,
-					ok: false,
-					error: error.message || String(error)
-				}, '*');
+	function getTwitchAuthHeaders() {
+		const authToken = getCookieValue('auth-token');
+		if (!authToken) return null;
+		return {
+			authorization: `OAuth ${authToken}`,
+			clientId: TWITCH_CLIENT_ID,
+			deviceId: getCookieValue('unique_id') || getCookieValue('unique_id_durable') || ''
+		};
+	}
+
+	function buildGqlHeaders(creds, integrityToken) {
+		const headers = {
+			'Accept': '*/*',
+			'Authorization': creds.authorization,
+			'Client-Id': creds.clientId,
+			'Content-Type': 'application/json'
+		};
+		if (creds.deviceId) headers['X-Device-Id'] = creds.deviceId;
+		if (integrityToken) headers['Client-Integrity'] = integrityToken;
+		return headers;
+	}
+
+	async function fetchIntegrityToken(creds) {
+		try {
+			const response = await fetch(`${GQL_URL}/integrity`, {
+				method: 'POST',
+				headers: buildGqlHeaders(creds)
 			});
+			if (!response.ok) return null;
+			const data = await response.json();
+			return data?.token || null;
+		} catch (e) {
+			return null;
+		}
+	}
+
+	async function gqlRequest(payloads, creds, integrityToken) {
+		const response = await fetch(GQL_URL, {
+			method: 'POST',
+			headers: buildGqlHeaders(creds, integrityToken),
+			body: JSON.stringify(payloads)
+		});
+		return response.json();
+	}
+
+	function getChannelLogin() {
+		const login = location.pathname.split('/').filter(Boolean)[0];
+		if (!login || login === 'popout' || login === 'directory') return null;
+		return login.toLowerCase();
+	}
+
+	async function getActivePrediction(channelLogin, creds, integrityToken) {
+		const payloads = [{
+			operationName: 'ChannelPointsPredictionContext',
+			variables: { count: 1, channelLogin },
+			extensions: {
+				persistedQuery: {
+					version: 1,
+					sha256Hash: PREDICTION_CONTEXT_HASH
+				}
+			}
+		}];
+		const result = await gqlRequest(payloads, creds, integrityToken);
+		const batch = Array.isArray(result) ? result[0] : result;
+		const channel = batch?.data?.community?.channel;
+		if (!channel) return null;
+
+		const events = [
+			...(channel.activePredictionEvents || []),
+			...(channel.lockedPredictionEvents || [])
+		];
+		if (events.length === 0) return null;
+
+		const event = events[0];
+		if (event.status !== 'ACTIVE') {
+			return { event, notActive: true };
+		}
+		return { event };
+	}
+
+	function findOutcomeForSide(outcomes, side) {
+		const wantYes = side === 'yes';
+		const aliases = wantYes ? ['yes', 'y', 'true', '1'] : ['no', 'n', 'false', '0'];
+		for (const outcome of outcomes || []) {
+			const title = (outcome.title || '').toLowerCase().trim();
+			if (aliases.some((alias) => title === alias || title.startsWith(alias))) {
+				return outcome;
+			}
+		}
+		if ((outcomes || []).length === 2) {
+			return wantYes ? outcomes[0] : outcomes[1];
+		}
+		return null;
+	}
+
+	function createTransactionId() {
+		if (typeof crypto?.randomUUID === 'function') {
+			return crypto.randomUUID().replace(/-/g, '');
+		}
+		return `${Date.now()}${Math.random().toString(16).slice(2)}`;
+	}
+
+	async function placePrediction(side, points) {
+		const normalizedSide = (side || '').toLowerCase();
+		if (normalizedSide !== 'yes' && normalizedSide !== 'no') {
+			return { ok: false, error: 'Prediction side must be yes or no' };
+		}
+
+		const creds = getTwitchAuthHeaders();
+		if (!creds) {
+			return { ok: false, error: 'Log in to Twitch to place predictions' };
+		}
+
+		const channelLogin = getChannelLogin();
+		if (!channelLogin) {
+			return { ok: false, error: 'Open a Twitch channel page to place predictions' };
+		}
+
+		const integrityToken = await fetchIntegrityToken(creds);
+		const active = await getActivePrediction(channelLogin, creds, integrityToken);
+		if (!active?.event) {
+			return { ok: false, error: 'No active prediction on this channel' };
+		}
+		if (active.notActive) {
+			return { ok: false, error: 'Prediction is not open for bets' };
+		}
+
+		const outcome = findOutcomeForSide(active.event.outcomes, normalizedSide);
+		if (!outcome) {
+			return { ok: false, error: `Could not find a "${normalizedSide}" outcome` };
+		}
+
+		const betPoints = Math.max(10, Math.floor(Number(points) || 0));
+		const payload = [{
+			operationName: 'MakePrediction',
+			variables: {
+				input: {
+					eventID: active.event.id,
+					outcomeID: outcome.id,
+					points: betPoints,
+					transactionID: createTransactionId()
+				}
+			},
+			extensions: {
+				persistedQuery: {
+					version: 1,
+					sha256Hash: MAKE_PREDICTION_HASH
+				}
+			}
+		}];
+
+		const result = await gqlRequest(payload, creds, integrityToken);
+		const batch = Array.isArray(result) ? result[0] : result;
+		if (batch?.errors?.length) {
+			return { ok: false, error: batch.errors[0].message || 'Prediction request failed' };
+		}
+
+		const predictionError = batch?.data?.makePrediction?.error;
+		if (predictionError) {
+			return {
+				ok: false,
+				error: predictionError.message || predictionError.code || 'Prediction failed'
+			};
+		}
+
+		return { ok: true };
+	}
+
+	function postBridgeResult(resultType, requestId, result) {
+		window.postMessage({
+			type: resultType,
+			requestId,
+			token: bridgeToken,
+			ok: !!result.ok,
+			error: result.error
+		}, '*');
+	}
+
+	window.addEventListener('message', (event) => {
+		if (event.source !== window || !event.data || event.data.token !== bridgeToken) {
+			return;
+		}
+
+		if (event.data.type === 'TQC_SEND_CHAT') {
+			const { text, requestId } = event.data;
+			sendChatMessage(text || '')
+				.then((result) => {
+					postBridgeResult('TQC_CHAT_RESULT', requestId, result);
+				})
+				.catch((error) => {
+					postBridgeResult('TQC_CHAT_RESULT', requestId, {
+						ok: false,
+						error: error.message || String(error)
+					});
+				});
+			return;
+		}
+
+		if (event.data.type === 'TQC_PLACE_PREDICTION') {
+			const { side, points, requestId } = event.data;
+			placePrediction(side, points)
+				.then((result) => {
+					postBridgeResult('TQC_PREDICTION_RESULT', requestId, result);
+				})
+				.catch((error) => {
+					postBridgeResult('TQC_PREDICTION_RESULT', requestId, {
+						ok: false,
+						error: error.message || String(error)
+					});
+				});
+		}
 	});
 })();

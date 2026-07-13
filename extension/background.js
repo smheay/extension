@@ -3,10 +3,10 @@ const DEFAULT_GAME_SECTIONS = [
 	{
 		title: 'Core Commands',
 		items: [
-			{ label: 'Fart (60s cd)', text: '!fart' },
 			{ label: 'Join', text: '!join' },
 			{ label: 'Spawn (10s cd)', text: '!spawn' },
-			{ label: 'Flee (60s cd)', text: '!flee' }
+			{ label: 'Flee (60s cd)', text: '!flee' },
+			{ label: 'Fart (60s cd)', text: '!fart' }
 		]
 	},
 	{
@@ -40,12 +40,20 @@ const DEFAULT_GAME_SECTIONS = [
 			{ label: 'Evolve Succubus (25)', text: '!evolvesuccubus' },
 			{ label: 'Evolve Woodland Joe (10)', text: '!evolvewoodlandjoe' }
 		]
-	},	{
+	},
+	{
 		title: 'Boss Vote',
 		items: [
-			{ label: 'Vote 1', text: '!vote1' },
-			{ label: 'Vote 2', text: '!vote2' },
-			{ label: 'Vote 3', text: '!vote3' }
+			{ label: 'Vote 1', text: '1' },
+			{ label: 'Vote 2', text: '2' },
+			{ label: 'Vote 3', text: '3' }
+		]
+	},
+	{
+		title: 'Prediction',
+		items: [
+			{ label: 'Predict Yes (250k)', text: 'tqc-predict:yes:250000' },
+			{ label: 'Predict No (250k)', text: 'tqc-predict:no:250000' }
 		]
 	}
 ];
@@ -156,14 +164,23 @@ chrome.runtime.onInstalled.addListener(async (details) => {
 		return;
 	}
 
+	// On update: never overwrite user profiles. Only seed/repair if storage is empty or active id is missing.
 	if (details.reason === 'update') {
 		const { tqcProfiles, tqcActiveProfileId } = await chrome.storage.sync.get(['tqcProfiles', 'tqcActiveProfileId']);
 		const profiles = tqcProfiles || {};
-		profiles.default = resetProfileToGameDefaults(profiles.default || {});
-		await chrome.storage.sync.set({
-			tqcProfiles: profiles,
-			tqcActiveProfileId: tqcActiveProfileId || 'default'
-		});
+		const profileIds = Object.keys(profiles);
+
+		if (profileIds.length === 0) {
+			await chrome.storage.sync.set({
+				tqcProfiles: createSeedProfiles(),
+				tqcActiveProfileId: 'default'
+			});
+			return;
+		}
+
+		if (!tqcActiveProfileId || !profiles[tqcActiveProfileId]) {
+			await chrome.storage.sync.set({ tqcActiveProfileId: profileIds[0] });
+		}
 	}
 });
 

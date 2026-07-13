@@ -221,32 +221,70 @@ const DROP_INDICATOR_CLEANUP_DELAY_MS = 50; // Delay to prevent flicker when mov
 
 
 let autoSaveTimeout = null;
+let pendingSaveProfileId = null;
+let editorProfileId = null;
+let profileNameSaveTimeout = null;
+let isHydratingProfiles = false;
+
+function cancelPendingSaves() {
+	if (autoSaveTimeout) {
+		clearTimeout(autoSaveTimeout);
+		autoSaveTimeout = null;
+	}
+	if (profileNameSaveTimeout) {
+		clearTimeout(profileNameSaveTimeout);
+		profileNameSaveTimeout = null;
+	}
+	pendingSaveProfileId = null;
+}
+
+async function persistSectionsToProfile(profileId) {
+	if (!profileId || isHydratingProfiles) return false;
+	const sectionsList = document.getElementById('sectionsList');
+	if (!sectionsList) return false;
+
+	const { profiles, activeId } = await loadProfiles();
+	if (!profiles[profileId]) return false;
+
+	const builtSections = captureCurrentSections();
+	if (!Array.isArray(builtSections)) return false;
+
+	profiles[profileId] = {
+		...profiles[profileId],
+		sections: builtSections
+	};
+	await saveProfiles(profiles, activeId || profileId);
+	return true;
+}
+
+async function flushPendingSectionSave() {
+	const targetId = pendingSaveProfileId || editorProfileId;
+	cancelPendingSaves();
+	if (!targetId) return;
+	await persistSectionsToProfile(targetId);
+}
 
 async function autoSave() {
+	if (!editorProfileId || isHydratingProfiles) return;
+
 	if (autoSaveTimeout) {
 		clearTimeout(autoSaveTimeout);
 	}
-	
+
+	pendingSaveProfileId = editorProfileId;
 	autoSaveTimeout = setTimeout(async () => {
+		autoSaveTimeout = null;
+		const targetId = pendingSaveProfileId;
+		pendingSaveProfileId = null;
+
 		try {
-			const { profiles, activeId } = await loadProfiles();
-			if (!profiles || !activeId) {
+			if (!targetId || targetId !== editorProfileId || isHydratingProfiles) {
 				return;
 			}
-			
-			const builtSections = captureCurrentSections();
-			if (!Array.isArray(builtSections)) {
-				return;
+			const saved = await persistSectionsToProfile(targetId);
+			if (saved) {
+				showNotification("Auto-saved", 800);
 			}
-			
-			const existingProfile = profiles[activeId] || createDefaultProfile();
-			profiles[activeId] = { 
-				...existingProfile, 
-				sections: builtSections
-			};
-			
-			await saveProfiles(profiles, activeId);
-			showNotification("Auto-saved", 800);
 		} catch (error) {
 			showNotification("Auto-save failed", 2000);
 		}
@@ -254,6 +292,7 @@ async function autoSave() {
 }
 
 document.getElementById("addSection").addEventListener("click", async () => {
+	cancelPendingSaves();
 	const { profiles, activeId } = await loadProfiles();
 	const currentSections = captureCurrentSections();
 	currentSections.push({ title: 'New Section', items: [] });
@@ -270,6 +309,7 @@ document.getElementById("addSection").addEventListener("click", async () => {
 });
 
 document.getElementById("resetDefaults").addEventListener("click", async () => {
+	cancelPendingSaves();
 	const { profiles, activeId } = await loadProfiles();
 	const currentProfile = profiles[activeId];
 	const profileName = currentProfile?.name || 'Current profile';
@@ -304,7 +344,8 @@ document.getElementById("resetDefaults").addEventListener("click", async () => {
 });
 
 document.getElementById("addProfile").addEventListener("click", async () => {
-	const { profiles, activeId } = await loadProfiles();
+	await flushPendingSectionSave();
+	const { profiles } = await loadProfiles();
 	const id = `p_${Date.now()}`;
 	profiles[id] = { name: "New Profile", sections: [] };
 	await saveProfiles(profiles, id);
@@ -312,9 +353,13 @@ document.getElementById("addProfile").addEventListener("click", async () => {
 });
 
 document.getElementById("deleteProfile").addEventListener("click", async () => {
+	cancelPendingSaves();
 	const { profiles, activeId } = await loadProfiles();
 	const ids = Object.keys(profiles);
 	if (ids.length <= 1) return; // keep at least one
+	if (!confirm(`Delete profile "${profiles[activeId]?.name || activeId}"? This cannot be undone.`)) {
+		return;
+	}
 	delete profiles[activeId];
 	const nextId = Object.keys(profiles)[0];
 	await saveProfiles(profiles, nextId);
@@ -366,47 +411,61 @@ function ensureGlobalDragHandlers() {
 }
 
 async function hydrateProfilesUI() {
-	const { profiles, activeId } = await loadProfiles();
-	const select = document.getElementById('profileSelect');
-	const profileNameInput = document.getElementById('profileName');
-	select.innerHTML = '';
-	Object.entries(profiles).forEach(([id, prof]) => {
-		const opt = document.createElement('option');
-		opt.value = id; opt.textContent = prof.name || id;
-		if (id === activeId) opt.selected = true;
-		select.appendChild(opt);
-	});
-	if (profileNameInput) {
-		profileNameInput.value = profiles[activeId]?.name || '';
+	isHydratingProfiles = true;
+	cancelPendingSaves();
+
+	try {
+		const { profiles, activeId } = await loadProfiles();
+		editorProfileId = activeId;
+		const select = document.getElementById('profileSelect');
+		const profileNameInput = document.getElementById('profileName');
+		select.innerHTML = '';
+		Object.entries(profiles).forEach(([id, prof]) => {
+			const opt = document.createElement('option');
+			opt.value = id; opt.textContent = prof.name || id;
+			if (id === activeId) opt.selected = true;
+			select.appendChild(opt);
+		});
+		if (profileNameInput) {
+			profileNameInput.value = profiles[activeId]?.name || '';
+		}
+		select.onchange = async () => {
+			const nextId = select.value;
+			const fromId = editorProfileId;
+
+			// DOM still shows the previous profile until hydrate — flush those edits first.
+			if (fromId && fromId !== nextId) {
+				await persistSectionsToProfile(fromId);
+			}
+			cancelPendingSaves();
+
+			const latest = await loadProfiles();
+			await saveProfiles(latest.profiles, nextId);
+			await hydrateProfilesUI();
+		};
+
+		const sectionsContainer = document.getElementById('sectionsContainer');
+		if (!sectionsContainer) return;
+
+		sectionsContainer.innerHTML = '';
+
+		const header = document.createElement('h2');
+		header.textContent = 'Sections (this profile)';
+		header.style.fontSize = '14px';
+		header.style.margin = '0 0 8px 0';
+		sectionsContainer.appendChild(header);
+
+		const list = document.createElement('div');
+		list.id = 'sectionsList';
+		list.style.display = 'grid';
+		list.style.gap = '8px';
+		sectionsContainer.appendChild(list);
+
+		await renderSectionsEditor(list);
+	} finally {
+		isHydratingProfiles = false;
 	}
-	select.onchange = async () => {
-		const nextId = select.value;
-		const latest = await loadProfiles();
-		await saveProfiles(latest.profiles, nextId);
-		await hydrateProfilesUI();
-	};
-
-	const sectionsContainer = document.getElementById('sectionsContainer');
-	if (!sectionsContainer) return;
-
-	sectionsContainer.innerHTML = '';
-
-	const header = document.createElement('h2');
-	header.textContent = 'Sections (this profile)';
-	header.style.fontSize = '14px';
-	header.style.margin = '0 0 8px 0';
-	sectionsContainer.appendChild(header);
-
-	const list = document.createElement('div');
-	list.id = 'sectionsList';
-	list.style.display = 'grid';
-	list.style.gap = '8px';
-	sectionsContainer.appendChild(list);
-
-	await renderSectionsEditor(list);
 }
-
-let profileNameSaveTimeout = null;
 
 function setupProfileRename() {
 	const profileNameInput = document.getElementById('profileName');
@@ -417,23 +476,31 @@ function setupProfileRename() {
 			clearTimeout(profileNameSaveTimeout);
 		}
 
+		const renamingProfileId = editorProfileId;
 		profileNameSaveTimeout = setTimeout(async () => {
+			profileNameSaveTimeout = null;
+			if (!renamingProfileId || renamingProfileId !== editorProfileId) {
+				return;
+			}
+
 			const { profiles, activeId } = await loadProfiles();
+			if (!profiles[renamingProfileId]) return;
+
 			const nextName = profileNameInput.value.trim();
 			if (!nextName) {
-				profileNameInput.value = profiles[activeId]?.name || '';
+				profileNameInput.value = profiles[renamingProfileId]?.name || '';
 				showNotification('Profile name cannot be empty', 2000);
 				return;
 			}
 
-			profiles[activeId] = {
-				...(profiles[activeId] || createDefaultProfile()),
+			profiles[renamingProfileId] = {
+				...profiles[renamingProfileId],
 				name: nextName
 			};
 			await saveProfiles(profiles, activeId);
 
 			const select = document.getElementById('profileSelect');
-			const selectedOption = select?.querySelector(`option[value="${activeId}"]`);
+			const selectedOption = select?.querySelector(`option[value="${renamingProfileId}"]`);
 			if (selectedOption) {
 				selectedOption.textContent = nextName;
 			}

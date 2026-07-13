@@ -57,17 +57,30 @@
 			return { ok: false, error: 'Chat bridge not ready' };
 		}
 
+		return postBridgeRequest('TQC_SEND_CHAT', 'TQC_CHAT_RESULT', { text }, bridgeToken);
+	}
+
+	async function placePredictionViaPageBridge(side, points) {
+		const bridgeToken = await waitForPageBridgeToken();
+		if (!bridgeToken) {
+			return { ok: false, error: 'Chat bridge not ready' };
+		}
+
+		return postBridgeRequest('TQC_PLACE_PREDICTION', 'TQC_PREDICTION_RESULT', { side, points }, bridgeToken);
+	}
+
+	function postBridgeRequest(requestType, resultType, payload, bridgeToken) {
 		return new Promise((resolve) => {
 			const requestId = `${Date.now()}-${Math.random()}`;
 			const timeout = setTimeout(() => {
 				window.removeEventListener('message', handler);
-				resolve({ ok: false, error: 'Chat send timed out' });
+				resolve({ ok: false, error: 'Request timed out' });
 			}, PAGE_BRIDGE_TIMEOUT_MS);
 
 			function handler(event) {
 				if (
 					event.source !== window ||
-					event.data?.type !== 'TQC_CHAT_RESULT' ||
+					event.data?.type !== resultType ||
 					event.data?.requestId !== requestId ||
 					event.data?.token !== bridgeToken
 				) {
@@ -82,7 +95,7 @@
 			}
 
 			window.addEventListener('message', handler);
-			window.postMessage({ type: 'TQC_SEND_CHAT', text, requestId, token: bridgeToken }, '*');
+			window.postMessage({ type: requestType, requestId, token: bridgeToken, ...payload }, '*');
 		});
 	}
 
@@ -131,6 +144,11 @@
 			return { ok: false, error: 'Invalid text parameter' };
 		}
 
+		const prediction = window.TqcStorage.parsePredictionCommand(text);
+		if (prediction) {
+			return placePredictionViaPageBridge(prediction.side, prediction.points);
+		}
+
 		return sendChatMessageViaPageBridge(text);
 	}
 
@@ -151,6 +169,7 @@
 	// ---------------------------
 	let overlayRoot = null;
 	let overlayMove = { dragging: false, offsetX: 0, offsetY: 0 };
+	let overlayResize = { active: false, startX: 0, startY: 0, startWidth: 0, startHeight: 0 };
 	let overlayController = null;
 
 	chrome.storage.onChanged.addListener(async (changes, area) => {
@@ -186,16 +205,32 @@
 		return { id: 'default', name: 'Default', sections: [] };
 	}
 
-	async function loadOverlayPosition() {
+	const OVERLAY_DEFAULTS = { top: 80, left: 20, width: 320 };
+	const OVERLAY_MIN_WIDTH = 240;
+	const OVERLAY_MIN_HEIGHT = 180;
+	const OVERLAY_HEADER_HEIGHT = 44;
+
+	async function loadOverlayLayout() {
 		const keys = window.TqcStorage.KEYS;
 		const local = await safeLocalGet(keys.overlayPos);
-		if (local && local[keys.overlayPos]) return local[keys.overlayPos];
-		return { top: 80, left: 20 };
+		const saved = local && local[keys.overlayPos] ? local[keys.overlayPos] : {};
+		return {
+			top: Number.isFinite(saved.top) ? saved.top : OVERLAY_DEFAULTS.top,
+			left: Number.isFinite(saved.left) ? saved.left : OVERLAY_DEFAULTS.left,
+			width: Number.isFinite(saved.width) ? saved.width : OVERLAY_DEFAULTS.width
+		};
 	}
 
-	async function saveOverlayPosition(pos) {
+	async function saveOverlayLayout(layout) {
 		const keys = window.TqcStorage.KEYS;
-		await safeLocalSet({ [keys.overlayPos]: pos });
+		const current = await loadOverlayLayout();
+		await safeLocalSet({
+			[keys.overlayPos]: {
+				top: Number.isFinite(layout.top) ? layout.top : current.top,
+				left: Number.isFinite(layout.left) ? layout.left : current.left,
+				width: Number.isFinite(layout.width) ? layout.width : current.width
+			}
+		});
 	}
 
 	function ensureStyles(root) {
@@ -206,17 +241,23 @@
 		const style = document.createElement('style');
 		style.id = 'tqc-style';
 		style.textContent = `
-			.tqc-overlay{position:fixed;z-index:2147483646;background:#111827cc;color:#e5e7eb;border:1px solid #374151;border-radius:8px;backdrop-filter:saturate(120%) blur(2px);box-shadow:0 6px 20px rgba(0,0,0,.45);width:320px;max-height:90vh;overflow-y:auto;}
-			.tqc-header{cursor:move;display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:#0b1220cc;border-bottom:1px solid #374151;border-top-left-radius:8px;border-top-right-radius:8px;user-select:none}
-			.tqc-title{font-size:13px;margin:0;display:flex;gap:8px;align-items:center}
-			.tqc-select{border:1px solid #374151;background:#111827;color:#e5e7eb;border-radius:6px;padding:6px 8px;font-size:12px}
-			.tqc-body{padding:10px;display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
-			.tqc-btn{border:1px solid #374151;border-radius:6px;background:#111827;color:#e5e7eb;padding:8px 10px;font-size:12px;text-align:center;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all 0.2s ease}
+			.tqc-overlay{position:fixed;z-index:2147483646;background:#111827cc;color:#e5e7eb;border:1px solid #374151;border-radius:8px;backdrop-filter:saturate(120%) blur(2px);box-shadow:0 6px 20px rgba(0,0,0,.45);width:320px;height:auto;min-width:${OVERLAY_MIN_WIDTH}px;min-height:${OVERLAY_MIN_HEIGHT}px;max-width:90vw;max-height:90vh;overflow:hidden;box-sizing:border-box;}
+			.tqc-header{position:absolute;top:0;left:0;right:0;height:${OVERLAY_HEADER_HEIGHT}px;box-sizing:border-box;cursor:move;display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:#0b1220cc;border-bottom:1px solid #374151;border-top-left-radius:8px;border-top-right-radius:8px;user-select:none;z-index:2}
+			.tqc-title{font-size:13px;margin:0;display:flex;gap:8px;align-items:center;min-width:0;flex:1}
+			.tqc-select{border:1px solid #374151;background:#111827;color:#e5e7eb;border-radius:6px;padding:6px 8px;font-size:12px;max-width:100%;min-width:0}
+			.tqc-scroll{position:absolute;top:${OVERLAY_HEADER_HEIGHT}px;left:0;right:0;bottom:0;overflow-x:hidden !important;overflow-y:scroll !important;overscroll-behavior:contain;touch-action:pan-y;-webkit-overflow-scrolling:touch;z-index:1}
+			.tqc-body{padding:6px 8px 12px 8px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px;align-content:start;min-height:min-content}
+			.tqc-btn{border:1px solid #374151;border-radius:6px;background:#111827;color:#e5e7eb;padding:4px 6px;font-size:11px;text-align:center;cursor:pointer;display:flex;align-items:center;justify-content:center;box-sizing:border-box;height:40px;min-height:40px;max-height:40px;overflow:hidden;transition:background 0.2s ease,opacity 0.2s ease,transform 0.2s ease}
 			.tqc-btn:hover{background:#0f172acc}
-			.tqc-close{background:transparent;border:none;color:#9ca3af;cursor:pointer;font-size:14px}
-			.tqc-section-title{grid-column:1/-1 !important;font-size:11px;color:#9ca3af;margin:4px 0 0 0;text-transform:uppercase;letter-spacing:.04em;display:flex;justify-content:space-between;align-items:center}
-			.tqc-section-add{background:#16a34a !important;border:none !important;color:#fff !important;border-radius:4px;width:18px !important;height:18px !important;font-size:12px;cursor:pointer;font-weight:bold;position:relative !important;padding:0 !important;margin:0 !important;box-sizing:border-box !important;display:table-cell !important;vertical-align:middle !important;text-align:center !important}
+			.tqc-btn > span{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;text-overflow:ellipsis;line-height:1.15;max-width:100%;word-break:break-word}
+			.tqc-close{background:transparent;border:none;color:#9ca3af;cursor:pointer;font-size:14px;flex-shrink:0}
+			.tqc-section-title{grid-column:1/-1 !important;font-size:11px;color:#9ca3af;margin:2px 0 0 0;padding:0;text-transform:uppercase;letter-spacing:.04em;display:flex;justify-content:space-between;align-items:center;gap:6px}
+			.tqc-section-actions{display:flex;align-items:center;gap:3px;flex-shrink:0}
+			.tqc-section-add,.tqc-section-del{border:none !important;border-radius:3px;width:14px !important;height:14px !important;font-size:10px;cursor:pointer;font-weight:bold;position:relative !important;padding:0 !important;margin:0 !important;box-sizing:border-box !important;display:flex !important;align-items:center;justify-content:center;line-height:1;color:#fff !important}
+			.tqc-section-add{background:#16a34a !important}
 			.tqc-section-add:hover{background:#15803d}
+			.tqc-section-del{background:#7f1d1d !important}
+			.tqc-section-del:hover{background:#991b1b}
 			.tqc-add-form{grid-column:1/-1;background:linear-gradient(135deg,#0f172a 0%,#1e293b 100%);border:1px solid #334155;border-radius:8px;padding:12px;margin:6px 0;box-shadow:0 4px 12px rgba(0,0,0,0.15)}
 			.tqc-add-input{background:#111827;border:1px solid #374151;border-radius:6px;color:#d1d5db;padding:8px 10px;font-size:12px;width:100%;margin:3px 0;box-sizing:border-box;transition:border-color 0.2s ease,box-shadow 0.2s ease}
 			.tqc-add-input:focus{outline:none;border-color:#16a34a;box-shadow:0 0 0 2px rgba(22,163,74,0.1)}
@@ -224,15 +265,22 @@
 			.tqc-add-buttons{display:flex;gap:8px;margin-top:10px;justify-content:flex-end}
 			.tqc-add-btn{border:1px solid #374151;border-radius:6px;background:#374151;color:#d1d5db;padding:8px 16px;font-size:11px;cursor:pointer;box-shadow:0 2px 4px rgba(0,0,0,0.2);display:flex;align-items:center;justify-content:center;transition:all 0.2s ease;font-weight:500}
 			.tqc-add-btn.save{background:linear-gradient(135deg,#16a34a 0%,#15803d 100%);border-color:#15803d;color:#fff;box-shadow:0 2px 6px rgba(22,163,74,0.3)}
+			.tqc-add-btn.danger{background:linear-gradient(135deg,#dc2626 0%,#b91c1c 100%);border-color:#b91c1c;color:#fff;box-shadow:0 2px 6px rgba(220,38,38,0.3)}
 			.tqc-add-btn:hover{transform:translateY(-1px);box-shadow:0 4px 8px rgba(0,0,0,0.3)}
 			.tqc-add-btn.save:hover{box-shadow:0 4px 12px rgba(22,163,74,0.4)}
+			.tqc-add-btn.danger:hover{box-shadow:0 4px 12px rgba(220,38,38,0.4)}
+			.tqc-confirm-message{grid-column:1/-1;color:#e5e7eb;font-size:12px;margin:0 0 4px 0;line-height:1.4}
 			.tqc-form-error{grid-column:1/-1;color:#fca5a5;font-size:11px;margin:4px 0 0 0}
+			.tqc-resize-handle{position:absolute;right:0;bottom:0;width:16px;height:16px;cursor:nwse-resize;z-index:3}
+			.tqc-resize-handle::before{content:'';position:absolute;right:4px;bottom:4px;width:8px;height:8px;border-right:2px solid #6b7280;border-bottom:2px solid #6b7280;border-radius:1px;opacity:.85}
+			.tqc-resize-handle:hover::before{border-color:#9ca3af}
 			
-			/* Custom scrollbar for overlay */
-			.tqc-overlay::-webkit-scrollbar{width:6px;}
-			.tqc-overlay::-webkit-scrollbar-track{background:transparent;}
-			.tqc-overlay::-webkit-scrollbar-thumb{background:#374151;border-radius:3px;}
-			.tqc-overlay::-webkit-scrollbar-thumb:hover{background:#4b5563;}
+			/* Custom scrollbar for overlay scroll area — !important beats Twitch global scrollbar hides */
+			.tqc-scroll::-webkit-scrollbar{width:10px !important;height:10px !important;display:block !important;}
+			.tqc-scroll::-webkit-scrollbar-track{background:#0b1220 !important;}
+			.tqc-scroll::-webkit-scrollbar-thumb{background:#6b7280 !important;border-radius:5px !important;border:2px solid #0b1220 !important;}
+			.tqc-scroll::-webkit-scrollbar-thumb:hover{background:#9ca3af !important;}
+			.tqc-scroll{scrollbar-width:auto !important;scrollbar-color:#6b7280 #0b1220 !important;}
 		`;
 		root.appendChild(style);
 	}
@@ -277,13 +325,38 @@
 		header.appendChild(addBtn);
 		header.appendChild(close);
 
+		const scrollArea = document.createElement('div');
+		scrollArea.className = 'tqc-scroll';
+		scrollArea.style.overflowY = 'scroll';
+		scrollArea.style.position = 'absolute';
+		scrollArea.style.top = OVERLAY_HEADER_HEIGHT + 'px';
+		scrollArea.style.left = '0';
+		scrollArea.style.right = '0';
+		scrollArea.style.bottom = '0';
+
 		const body = document.createElement('div');
 		body.className = 'tqc-body';
+		scrollArea.appendChild(body);
+
+		const resizeHandle = document.createElement('div');
+		resizeHandle.className = 'tqc-resize-handle';
+		resizeHandle.title = 'Drag to resize';
 
 		container.appendChild(header);
-		container.appendChild(body);
+		container.appendChild(scrollArea);
+		container.appendChild(resizeHandle);
 		document.body.appendChild(container);
 		overlayRoot = container;
+
+		// Twitch steals wheel events for the page/player — scroll the panel ourselves.
+		container.addEventListener('wheel', (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			const overScroll = scrollArea.contains(e.target) || e.target === scrollArea;
+			if (!overScroll) return;
+			const delta = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
+			scrollArea.scrollTop += delta;
+		}, { passive: false, capture: true });
 
 		// Dragging
 		header.addEventListener('mousedown', (e) => {
@@ -298,18 +371,63 @@
 			overlayMove.offsetY = e.clientY - rect.top;
 			e.preventDefault();
 		});
-		let lastPos = null;
+
+		resizeHandle.addEventListener('mousedown', (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			const rect = container.getBoundingClientRect();
+			overlayResize.active = true;
+			overlayResize.startX = e.clientX;
+			overlayResize.startY = e.clientY;
+			overlayResize.startWidth = rect.width;
+			overlayResize.startHeight = rect.height;
+		});
+
+		let lastLayout = null;
+		let heightLockedByUser = false;
+
+		function fitHeightToContent() {
+			if (heightLockedByUser) return;
+			const contentHeight = body.scrollHeight;
+			const needed = OVERLAY_HEADER_HEIGHT + contentHeight;
+			const maxHeight = Math.max(OVERLAY_MIN_HEIGHT, Math.floor(window.innerHeight * 0.9));
+			const nextHeight = Math.min(maxHeight, Math.max(OVERLAY_MIN_HEIGHT, needed));
+			container.style.height = nextHeight + 'px';
+		}
+
 		window.addEventListener('mousemove', (e) => {
+			if (overlayResize.active) {
+				const maxWidth = Math.max(OVERLAY_MIN_WIDTH, window.innerWidth * 0.9);
+				const maxHeight = Math.max(OVERLAY_MIN_HEIGHT, window.innerHeight * 0.9);
+				const width = Math.min(
+					maxWidth,
+					Math.max(OVERLAY_MIN_WIDTH, overlayResize.startWidth + (e.clientX - overlayResize.startX))
+				);
+				const height = Math.min(
+					maxHeight,
+					Math.max(OVERLAY_MIN_HEIGHT, overlayResize.startHeight + (e.clientY - overlayResize.startY))
+				);
+				container.style.width = width + 'px';
+				container.style.height = height + 'px';
+				heightLockedByUser = true;
+				lastLayout = { width };
+				return;
+			}
+
 			if (!overlayMove.dragging) return;
 			const top = Math.max(0, e.clientY - overlayMove.offsetY);
 			const left = Math.max(0, e.clientX - overlayMove.offsetX);
 			container.style.top = top + 'px';
 			container.style.left = left + 'px';
-			lastPos = { top, left };
+			lastLayout = { top, left };
 		});
 		window.addEventListener('mouseup', async () => {
 			overlayMove.dragging = false;
-			if (lastPos) { await saveOverlayPosition(lastPos); }
+			overlayResize.active = false;
+			if (lastLayout) {
+				await saveOverlayLayout(lastLayout);
+				lastLayout = null;
+			}
 		});
 
 		addBtn.addEventListener('click', () => {
@@ -318,10 +436,11 @@
 
 		close.addEventListener('click', () => { container.style.display = 'none'; });
 
-		// Position
-		const pos = await loadOverlayPosition();
-		container.style.top = pos.top + 'px';
-		container.style.left = pos.left + 'px';
+		// Position + width (height fits each profile after render)
+		const layout = await loadOverlayLayout();
+		container.style.top = layout.top + 'px';
+		container.style.left = layout.left + 'px';
+		container.style.width = layout.width + 'px';
 
 		let isUpdatingProfile = false; // Flag to prevent double-rendering during profile changes
 
@@ -338,6 +457,7 @@
 			});
 			profileSelect.onchange = async () => {
 				isUpdatingProfile = true;
+				heightLockedByUser = false;
 				await safeSyncSet({ [keys.activeProfileId]: profileSelect.value });
 		
 				body.textContent = '';
@@ -385,25 +505,42 @@
 				const titleSpan = document.createElement('span');
 				titleSpan.textContent = title;
 				
+				const actions = document.createElement('div');
+				actions.className = 'tqc-section-actions';
+
 				const addSectionBtn = document.createElement('button');
 				addSectionBtn.className = 'tqc-section-add';
-				addSectionBtn.innerHTML = '<span style="display:block;width:100%;height:100%;line-height:18px;text-align:center;">+</span>';
+				addSectionBtn.textContent = '+';
 				addSectionBtn.title = 'Add command to this section';
 				addSectionBtn.addEventListener('click', () => showAddCommandForm(originalIndex));
-				
+
+				const deleteSectionBtn = document.createElement('button');
+				deleteSectionBtn.className = 'tqc-section-del';
+				deleteSectionBtn.textContent = '✕';
+				deleteSectionBtn.title = 'Delete this section';
+				deleteSectionBtn.addEventListener('click', () => {
+					showDeleteSectionConfirm(originalIndex, baseTitle);
+				});
+
+				actions.appendChild(addSectionBtn);
+				actions.appendChild(deleteSectionBtn);
 				headerEl.appendChild(titleSpan);
-				headerEl.appendChild(addSectionBtn);
+				headerEl.appendChild(actions);
 				body.appendChild(headerEl);
 				
 				const spacer = document.createElement('div');
 				spacer.style.gridColumn = '1/-1';
-				spacer.style.height = '4px';
+				spacer.style.height = '1px';
 				body.appendChild(spacer);
 
 				items.forEach(item => {
 					const btn = document.createElement('button');
 					btn.className = 'tqc-btn';
-					btn.textContent = item.label || item.text || '(unnamed)';
+					const labelText = item.label || item.text || '(unnamed)';
+					const label = document.createElement('span');
+					label.textContent = labelText;
+					btn.appendChild(label);
+					btn.title = labelText;
 					btn.addEventListener('click', async () => {
 						const now = Date.now();
 						
@@ -424,7 +561,15 @@
 						lastCommandTime = now;
 						
 						try {
-							await sendChatMessage(item.text || '');
+							const result = await sendChatMessage(item.text || '');
+							if (!result?.ok && result?.error) {
+								btn.style.outline = '1px solid #f87171';
+								btn.title = result.error;
+								setTimeout(() => {
+									btn.style.outline = '';
+									btn.title = '';
+								}, 2000);
+							}
 						} finally {
 							// Release lock after command completes
 							setTimeout(() => {
@@ -445,6 +590,8 @@
 					empty.textContent = 'No commands. Use extension options.';
 					body.appendChild(empty);
 				}
+
+				fitHeightToContent();
 			} finally {
 				isRendering = false;
 			}
@@ -475,6 +622,65 @@
 			if (errorEl) {
 				errorEl.remove();
 			}
+		}
+
+		function showDeleteSectionConfirm(sectionIndex, sectionTitle) {
+			body.querySelectorAll('.tqc-add-form').forEach((f) => f.remove());
+
+			const form = document.createElement('div');
+			form.className = 'tqc-add-form';
+
+			const message = document.createElement('div');
+			message.className = 'tqc-confirm-message';
+			message.textContent = `Delete section "${sectionTitle}" and all of its commands?`;
+
+			const buttons = document.createElement('div');
+			buttons.className = 'tqc-add-buttons';
+
+			const confirmBtn = document.createElement('button');
+			confirmBtn.className = 'tqc-add-btn danger';
+			confirmBtn.textContent = 'Delete';
+
+			const cancelBtn = document.createElement('button');
+			cancelBtn.className = 'tqc-add-btn';
+			cancelBtn.textContent = 'Cancel';
+
+			buttons.appendChild(confirmBtn);
+			buttons.appendChild(cancelBtn);
+			form.appendChild(message);
+			form.appendChild(buttons);
+
+			const sectionHeader = body.querySelector(`.tqc-section-title[data-section-index="${sectionIndex}"]`);
+			if (sectionHeader) {
+				const spacer = sectionHeader.nextElementSibling;
+				if (spacer) {
+					spacer.insertAdjacentElement('afterend', form);
+				} else {
+					body.appendChild(form);
+				}
+			} else {
+				body.insertBefore(form, body.firstChild);
+			}
+
+			confirmBtn.addEventListener('click', async () => {
+				try {
+					const active = await loadActiveProfile();
+					const sections = Array.isArray(active?.sections) ? active.sections.slice() : [];
+					if (sectionIndex < 0 || sectionIndex >= sections.length) {
+						form.remove();
+						return;
+					}
+					sections.splice(sectionIndex, 1);
+					await saveProfileSections(sections);
+					form.remove();
+					await render();
+				} catch (error) {
+					showFormError(form, 'Failed to delete section');
+				}
+			});
+
+			cancelBtn.addEventListener('click', () => form.remove());
+			confirmBtn.focus();
 		}
 
 		function showAddSectionForm() {

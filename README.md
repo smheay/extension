@@ -106,8 +106,8 @@ A Chrome extension that helps streamers and viewers quickly send predefined comm
 **Lost custom commands?**
 - Commands are saved automatically and persist between sessions
 - Custom profiles you created are kept when the extension updates
-- The built-in **Game commands** profile is refreshed to the latest default commands on each update
-- Use **Reset to Defaults** on any profile to restore its default command set
+- Built-in starter profiles (**Game commands**, **Emotes**) are only created on first install — updates never overwrite your profiles
+- Use **Reset to Defaults** on any profile to restore a starter command set when you want
 
 ## 📝 Version History
 
@@ -115,7 +115,7 @@ A Chrome extension that helps streamers and viewers quickly send predefined comm
 - Refactored chat sending into a three-strategy fallback chain (onSendMessage → slate input → DOM)
 - Page bridge token auth for safer chat postMessage handling
 - Fixed WYSIWYG editor crashes and first-click double-send on fallback paths
-- Game commands profile refreshes on extension update; custom profiles preserved
+- Game commands profile refresh on update (later removed in newer releases; use Reset to Defaults)
 - Fixed overlay storage listener leak on SPA navigation
 - Duplicate section titles visible in overlay (labeled Section (2), etc.)
 - Popup error feedback when Panel is used off Twitch; shortcut hint Ctrl+Shift+Y
@@ -123,7 +123,7 @@ A Chrome extension that helps streamers and viewers quickly send predefined comm
 ### v1.1.3
 - Fixed overlay add-command form placement for duplicate section names
 - Removed unused message handlers
-- Game commands profile auto-updates on extension update; custom profiles are preserved
+- Game commands profile auto-updated on extension update at the time (custom profiles preserved)
 
 ### v1.1.2
 - Reliable chat sending via main-world page bridge (Twitch Slate editor)
